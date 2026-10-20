@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp"
+    android:background="#121212">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Abo Ezzat Share"
+        android:textColor="#FFD700"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="أدخل عنوان الشاشة الظاهر على التلفزيون:"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:layout_marginBottom="12dp" />
+
+    <EditText
+        android:id="@+id/et_ip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="مثال: 192.168.1.15"
+        android:textColor="#FFFFFF"
+        android:textColorHint="#777777"
+        android:background="#1E1E1E"
+        android:padding="14dp"
+        android:inputType="textUri"
+        android:layout_marginBottom="20dp" />
+
+    <Button
+        android:id="@+id/btn_save"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="حفظ الإعدادات"
+        android:backgroundTint="#FFD700"
+        android:textColor="#000000"
+        android:textStyle="bold"
+        android:padding="12dp" />
+
+</LinearLayout>
