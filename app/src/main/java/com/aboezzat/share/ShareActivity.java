@@ -1,18 +1,18 @@
 package com.aboezzat.share;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.Toast;
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -20,16 +20,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import org.json.JSONObject;
+
 public class ShareActivity extends Activity {
 
     private final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private WebView webView;
+    private boolean isCaptured = false;
+    private String targetTvIp = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,7 +52,7 @@ public class ShareActivity extends Activity {
             if (sharedText != null) {
                 String extractedUrl = extractUrl(sharedText);
                 if (extractedUrl != null) {
-                    processAndSend(extractedUrl);
+                    processUrl(extractedUrl);
                     return;
                 }
             }
@@ -61,97 +69,35 @@ public class ShareActivity extends Activity {
         return null;
     }
 
-    private void processAndSend(String url) {
+    private void processUrl(String url) {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
-        String tvIp = prefs.getString("tv_ip", "").trim();
+        targetTvIp = prefs.getString("tv_ip", "").trim();
 
-        if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى فتح التطبيق وتعيين عنوان الشاشة أولاً", Toast.LENGTH_LONG).show();
+        if (targetTvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة من داخل التطبيق أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        // 1. يوتيوب يُرسل مباشرة
+        // 1. يوتيوب يُرسل فوراً
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
-            sendToTv(tvIp, url);
+            sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. إذا كان الرابط بث مباشر لتيك توك (TikTok LIVE)
-        if (url.contains("tiktok.com") && url.contains("/live")) {
-            Toast.makeText(this, "جاري استخراج رابط البث المباشر...", Toast.LENGTH_SHORT).show();
-            extractTikTokLive(url, tvIp);
-            return;
-        }
-
-        // 3. فيديوهات تيك توك العادية
-        if (url.contains("tiktok.com")) {
+        // 2. فيديوهات تيك توك العادية (عبر الـ API السريع)
+        if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
-            extractTikTokVideo(url, tvIp);
+            extractTikTokVideo(url);
             return;
         }
 
-        // 4. البث المباشر أو الفيديوهات لفيسبوك، إنستجرام، وتويتر
-        Toast.makeText(this, "جاري معالجة الرابط وإرساله...", Toast.LENGTH_SHORT).show();
-        extractGeneralMedia(url, tvIp);
+        // 3. البث المباشر لتيك توك أو أي منصة معقدة (فيسبوك، إنستجرام) يتم قنصها بالـ WebView
+        Toast.makeText(this, "جاري قنص رابط البث للشاشة...", Toast.LENGTH_SHORT).show();
+        startSniffing(url);
     }
 
-    // استخراج تدفق البث المباشر (HLS / FLV)
-    private void extractTikTokLive(String url, String tvIp) {
-        Request request = new Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .build();
-
-        client.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                sendToTv(tvIp, url);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                try {
-                    String html = response.body().string();
-                    
-                    // البحث عن رابط البث بصيغة m3u8 أو flv داخل صفحة البث
-                    Pattern streamPattern = Pattern.compile("(https?://[^\"'\\s\\\\]+?\\.(?:m3u8|flv)[^\"'\\s\\\\]*)");
-                    Matcher matcher = streamPattern.matcher(html);
-                    if (matcher.find()) {
-                        String streamUrl = matcher.group(1).replace("\\u0026", "&");
-                        sendToTv(tvIp, streamUrl);
-                        return;
-                    }
-
-                    // البحث في كائن البث المباشر JSON الافتراضي لـ TikTok
-                    Pattern jsonPattern = Pattern.compile("\"streamData\":\"(.*?)\"");
-                    Matcher jsonMatcher = jsonPattern.matcher(html);
-                    if (jsonMatcher.find()) {
-                        String rawJson = jsonMatcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\");
-                        JSONObject streamObj = new JSONObject(rawJson);
-                        JSONObject data = streamObj.getJSONObject("data");
-                        for (java.util.Iterator<String> it = data.keys(); it.hasNext(); ) {
-                            String key = it.next();
-                            JSONObject quality = data.getJSONObject(key).getJSONObject("main");
-                            String flvUrl = quality.optString("flv");
-                            String hlsUrl = quality.optString("hls");
-                            if (!flvUrl.isEmpty()) {
-                                sendToTv(tvIp, flvUrl);
-                                return;
-                            } else if (!hlsUrl.isEmpty()) {
-                                sendToTv(tvIp, hlsUrl);
-                                return;
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-                sendToTv(tvIp, url);
-            }
-        });
-    }
-
-    private void extractTikTokVideo(String url, String tvIp) {
+    private void extractTikTokVideo(String url) {
         try {
             String apiUrl = "https://www.tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8");
             Request request = new Request.Builder().url(apiUrl).build();
@@ -159,7 +105,7 @@ public class ShareActivity extends Activity {
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    sendToTv(tvIp, url);
+                    startSniffing(url);
                 }
 
                 @Override
@@ -172,51 +118,63 @@ public class ShareActivity extends Activity {
                             String play = data.optString("play");
                             if (!play.isEmpty()) {
                                 if (!play.startsWith("http")) play = "https://www.tikwm.com" + play;
-                                sendToTv(tvIp, play);
+                                sendToTv(targetTvIp, play);
                                 return;
                             }
                         }
                     } catch (Exception ignored) {}
-                    sendToTv(tvIp, url);
+                    mainHandler.post(() -> startSniffing(url));
                 }
             });
         } catch (Exception e) {
-            sendToTv(tvIp, url);
+            startSniffing(url);
         }
     }
 
-    private void extractGeneralMedia(String url, String tvIp) {
-        try {
-            String apiUrl = "https://api.vkrdown.com/api/get?url=" + URLEncoder.encode(url, "UTF-8");
-            Request request = new Request.Builder()
-                    .url(apiUrl)
-                    .header("User-Agent", "Mozilla/5.0")
-                    .build();
+    @SuppressLint("SetJavaScriptEnabled")
+    private void startSniffing(String url) {
+        isCaptured = false;
+        webView = new WebView(this);
+        WebSettings settings = webView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 
-            client.newCall(request).enqueue(new Callback() {
-                @Override
-                public void onFailure(Call call, IOException e) {
-                    sendToTv(tvIp, url);
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String reqUrl = request.getUrl().toString();
+                
+                // قنص روابط البث الحي وملفات الفيديو المباشرة
+                if (!isCaptured && (reqUrl.contains(".m3u8") || reqUrl.contains(".flv") || reqUrl.contains(".mp4") || reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls"))) {
+                    isCaptured = true;
+                    mainHandler.post(() -> {
+                        sendToTv(targetTvIp, reqUrl);
+                        destroyWebView();
+                    });
                 }
+                return super.shouldInterceptRequest(view, request);
+            }
+        });
 
-                @Override
-                public void onResponse(Call call, Response response) throws IOException {
-                    try {
-                        String body = response.body().string();
-                        JSONObject json = new JSONObject(body);
-                        if (json.has("data")) {
-                            JSONObject data = json.getJSONObject("data");
-                            if (data.has("url")) {
-                                sendToTv(tvIp, data.getString("url"));
-                                return;
-                            }
-                        }
-                    } catch (Exception ignored) {}
-                    sendToTv(tvIp, url);
-                }
-            });
-        } catch (Exception e) {
-            sendToTv(tvIp, url);
+        webView.loadUrl(url);
+
+        // مهلة حماية 20 ثانية لإغلاق الصفحة لو لم يتم العثور على بث
+        mainHandler.postDelayed(() -> {
+            if (!isCaptured) {
+                Toast.makeText(ShareActivity.this, "تعذر قنص البث، تأكد من أن الرابط مباشر", Toast.LENGTH_SHORT).show();
+                destroyWebView();
+                finish();
+            }
+        }, 20000);
+    }
+
+    private void destroyWebView() {
+        if (webView != null) {
+            webView.stopLoading();
+            webView.destroy();
+            webView = null;
         }
     }
 
@@ -244,7 +202,7 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onResponse(Call call, Response response) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تم قنص الفيديو وتشغيله على الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
@@ -252,5 +210,11 @@ public class ShareActivity extends Activity {
         } catch (Exception e) {
             mainHandler.post(this::finish);
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        destroyWebView();
+        super.onDestroy();
     }
 }
