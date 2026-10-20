@@ -2,11 +2,6 @@ plugins {
     id 'com.android.application'
 }
 
-repositories {
-    google()
-    mavenCentral()
-}
-
 android {
     namespace 'com.aboezzat.share'
     compileSdk 34
