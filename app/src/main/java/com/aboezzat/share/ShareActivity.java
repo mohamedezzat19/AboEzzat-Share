@@ -95,13 +95,13 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب (مباشر وسريع زي ما هو)
+        // 1. يوتيوب
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. تيك توك العادي (API سريع بدون متصفح)
+        // 2. تيك توك العادي (API سريع)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
@@ -157,10 +157,9 @@ public class ShareActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         
-        // إعداد User-Agent مرن يفتح البث ولا يطلب تسجيل دخول إجباري
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
+        // رجعنا لـ Desktop Chrome لأنه الأفضل لثريد وتويتر وبث الويب
+        settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
 
-        // جسر لاستلام الروابط من داخل كود الصفحة مباشرة لو الوسوم اشتغلت
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onMediaFound(String mediaUrl) {
@@ -179,16 +178,19 @@ public class ShareActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
-                // محاولة تحفيز تشغيل الفيديو/البث تلقائياً لقنص الرابط
                 String js = "(function() { " +
-                        "   var vids = document.getElementsByTagName('video'); " +
-                        "   for (var i = 0; i < vids.length; i++) { " +
-                        "       vids[i].play(); " +
-                        "       var src = vids[i].currentSrc || vids[i].src; " +
-                        "       if (src && src.startsWith('http')) { " +
-                        "           window.MediaSniffer.onMediaFound(src); " +
+                        "   function scan() { " +
+                        "       var vids = document.getElementsByTagName('video'); " +
+                        "       for (var i = 0; i < vids.length; i++) { " +
+                        "           vids[i].play(); " +
+                        "           var src = vids[i].currentSrc || vids[i].src; " +
+                        "           if (src && src.startsWith('http')) { " +
+                        "               window.MediaSniffer.onMediaFound(src); " +
+                        "           } " +
                         "       } " +
                         "   } " +
+                        "   scan(); " +
+                        "   setInterval(scan, 800); " +
                         "})();";
                 view.evaluateJavascript(js, null);
             }
@@ -210,21 +212,25 @@ public class ShareActivity extends Activity {
 
         String lower = reqUrl.toLowerCase();
 
-        // 1. استبعاد ملفات النظام والمكتبات والصور
+        // استبعاد الصور والملفات النصية غير المرغوبة
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
             lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php")) {
             return;
         }
 
-        // 2. التقاط روابط البث والتدفق الحي (HLS / FLV)
+        // 1. صيغ البث المباشر (HLS / FLV)
         boolean isLiveStream = lower.contains(".m3u8") ||
                                lower.contains(".flv") ||
                                lower.contains("pull-flv") ||
                                lower.contains("pull-hls") ||
                                lower.contains("live-hls");
 
-        // 3. التقاط ملفات الفيديو العادية (تويتر، ثريد، فيسبوك، إنستجرام)
-        boolean isDirectVideo = lower.contains(".mp4") || lower.contains("video_playback");
+        // 2. ملفات الفيديو المباشرة (تويتر، ثريد، فيسبوك، إنستجرام)
+        // دعم صريح لسيرفرات فيديو ميتا (cdninstagram و fbcdn)
+        boolean isDirectVideo = lower.contains(".mp4") ||
+                                lower.contains("video_playback") ||
+                                (lower.contains("cdninstagram.com") && lower.contains("&bytestart=")) ||
+                                (lower.contains("fbcdn.net") && lower.contains("&bytestart="));
 
         if (isLiveStream || isDirectVideo) {
             isCaptured = true;
