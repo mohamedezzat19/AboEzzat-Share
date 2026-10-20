@@ -23,8 +23,10 @@ import java.util.regex.Pattern;
 public class ShareActivity extends Activity {
 
     private final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -64,36 +66,95 @@ public class ShareActivity extends Activity {
         String tvIp = prefs.getString("tv_ip", "").trim();
 
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى فتح Abo Ezzat Share وحفظ IP الشاشة أولاً", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "يرجى فتح التطبيق وتعيين عنوان الشاشة أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        Toast.makeText(this, "جاري استخراج الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
-
-        // 1. يوتيوب يُرسل مباشرة لسمارت تيوب
+        // 1. يوتيوب يُرسل مباشرة
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(tvIp, url);
             return;
         }
 
-        // 2. تيك توك: استخراج ملف MP4 الصافي مباشرة
-        if (url.contains("tiktok.com")) {
-            extractTikTok(url, tvIp);
+        // 2. إذا كان الرابط بث مباشر لتيك توك (TikTok LIVE)
+        if (url.contains("tiktok.com") && url.contains("/live")) {
+            Toast.makeText(this, "جاري استخراج رابط البث المباشر...", Toast.LENGTH_SHORT).show();
+            extractTikTokLive(url, tvIp);
             return;
         }
 
-        // 3. فيسبوك، إنستجرام، ثريدز: استخراج الفيديو الخام
-        extractSocialMedia(url, tvIp);
+        // 3. فيديوهات تيك توك العادية
+        if (url.contains("tiktok.com")) {
+            Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
+            extractTikTokVideo(url, tvIp);
+            return;
+        }
+
+        // 4. البث المباشر أو الفيديوهات لفيسبوك، إنستجرام، وتويتر
+        Toast.makeText(this, "جاري معالجة الرابط وإرساله...", Toast.LENGTH_SHORT).show();
+        extractGeneralMedia(url, tvIp);
     }
 
-    private void extractTikTok(String url, String tvIp) {
+    // استخراج تدفق البث المباشر (HLS / FLV)
+    private void extractTikTokLive(String url, String tvIp) {
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                sendToTv(tvIp, url);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    String html = response.body().string();
+                    
+                    // البحث عن رابط البث بصيغة m3u8 أو flv داخل صفحة البث
+                    Pattern streamPattern = Pattern.compile("(https?://[^\"'\\s\\\\]+?\\.(?:m3u8|flv)[^\"'\\s\\\\]*)");
+                    Matcher matcher = streamPattern.matcher(html);
+                    if (matcher.find()) {
+                        String streamUrl = matcher.group(1).replace("\\u0026", "&");
+                        sendToTv(tvIp, streamUrl);
+                        return;
+                    }
+
+                    // البحث في كائن البث المباشر JSON الافتراضي لـ TikTok
+                    Pattern jsonPattern = Pattern.compile("\"streamData\":\"(.*?)\"");
+                    Matcher jsonMatcher = jsonPattern.matcher(html);
+                    if (jsonMatcher.find()) {
+                        String rawJson = jsonMatcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\");
+                        JSONObject streamObj = new JSONObject(rawJson);
+                        JSONObject data = streamObj.getJSONObject("data");
+                        for (java.util.Iterator<String> it = data.keys(); it.hasNext(); ) {
+                            String key = it.next();
+                            JSONObject quality = data.getJSONObject(key).getJSONObject("main");
+                            String flvUrl = quality.optString("flv");
+                            String hlsUrl = quality.optString("hls");
+                            if (!flvUrl.isEmpty()) {
+                                sendToTv(tvIp, flvUrl);
+                                return;
+                            } else if (!hlsUrl.isEmpty()) {
+                                sendToTv(tvIp, hlsUrl);
+                                return;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+                sendToTv(tvIp, url);
+            }
+        });
+    }
+
+    private void extractTikTokVideo(String url, String tvIp) {
         try {
             String apiUrl = "https://www.tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8");
-            Request request = new Request.Builder()
-                    .url(apiUrl)
-                    .header("User-Agent", "Mozilla/5.0")
-                    .build();
+            Request request = new Request.Builder().url(apiUrl).build();
 
             client.newCall(request).enqueue(new Callback() {
                 @Override
@@ -124,7 +185,7 @@ public class ShareActivity extends Activity {
         }
     }
 
-    private void extractSocialMedia(String url, String tvIp) {
+    private void extractGeneralMedia(String url, String tvIp) {
         try {
             String apiUrl = "https://api.vkrdown.com/api/get?url=" + URLEncoder.encode(url, "UTF-8");
             Request request = new Request.Builder()
@@ -175,7 +236,7 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onFailure(Call call, IOException e) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تعذر الإرسال: تحقق من اتصال الشاشة بالواي فاي", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تعذر الإرسال: تأكد من الشاشة والـ IP", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
@@ -183,7 +244,7 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onResponse(Call call, Response response) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تم الإرسال والتشغيل على الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
