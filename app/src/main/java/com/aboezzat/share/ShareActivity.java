@@ -157,7 +157,7 @@ public class ShareActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         
-        // رجعنا لـ Desktop Chrome لأنه الأفضل لثريد وتويتر وبث الويب
+        // متصفح سطح مكتب لتجاوز صفحات الحظر
         settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
@@ -178,6 +178,7 @@ public class ShareActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
+                // محاكاة التشغيل وفحص مصادر الفيديو
                 String js = "(function() { " +
                         "   function scan() { " +
                         "       var vids = document.getElementsByTagName('video'); " +
@@ -212,24 +213,27 @@ public class ShareActivity extends Activity {
 
         String lower = reqUrl.toLowerCase();
 
-        // استبعاد الصور والملفات النصية غير المرغوبة
+        // استبعاد الملفات غير الصالحة كفيديو
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
             lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php")) {
             return;
         }
 
-        // 1. صيغ البث المباشر (HLS / FLV)
+        // 1. استبعاد أجزاء البث الفرعية (Chunks) التي تسبب توقف البث فوراً عند الصفر
+        if (lower.contains(".ts") || lower.contains("/fragment") || lower.contains("/seg-")) {
+            return;
+        }
+
+        // 2. قنص روابط البث المباشر الكاملة (قوائم التشغيل أو روابط FLV المتدفقة)
         boolean isLiveStream = lower.contains(".m3u8") ||
-                               lower.contains(".flv") ||
                                lower.contains("pull-flv") ||
                                lower.contains("pull-hls") ||
-                               lower.contains("live-hls");
+                               (lower.contains(".flv") && !lower.contains("thumb"));
 
-        // 2. ملفات الفيديو المباشرة (تويتر، ثريد، فيسبوك، إنستجرام)
-        // دعم صريح لسيرفرات فيديو ميتا (cdninstagram و fbcdn)
+        // 3. قنص ملفات الفيديو لفيسبوك، إنستجرام، ثريد، وتويتر
         boolean isDirectVideo = lower.contains(".mp4") ||
                                 lower.contains("video_playback") ||
-                                (lower.contains("cdninstagram.com") && lower.contains("&bytestart=")) ||
+                                lower.contains("cdninstagram.com") ||
                                 (lower.contains("fbcdn.net") && lower.contains("&bytestart="));
 
         if (isLiveStream || isDirectVideo) {
