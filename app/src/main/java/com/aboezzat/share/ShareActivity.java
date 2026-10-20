@@ -4,14 +4,18 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.ViewGroup;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 import android.widget.Toast;
 
 import java.io.IOException;
@@ -30,8 +34,8 @@ import org.json.JSONObject;
 public class ShareActivity extends Activity {
 
     private final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -42,6 +46,18 @@ public class ShareActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // واجهة خفيفة جداً مع مؤشر تحميل
+        FrameLayout rootLayout = new FrameLayout(this);
+        rootLayout.setBackgroundColor(Color.TRANSPARENT);
+        ProgressBar progressBar = new ProgressBar(this);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.gravity = android.view.Gravity.CENTER;
+        rootLayout.addView(progressBar, params);
+        setContentView(rootLayout);
 
         Intent intent = getIntent();
         String action = intent.getAction();
@@ -74,26 +90,26 @@ public class ShareActivity extends Activity {
         targetTvIp = prefs.getString("tv_ip", "").trim();
 
         if (targetTvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة من داخل التطبيق أولاً", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "يرجى فتح التطبيق وتعيين IP الشاشة أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        // 1. يوتيوب يُرسل فوراً
+        // 1. يوتيوب يُرسل مباشرة لسمارت تيوب
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. فيديوهات تيك توك العادية (عبر الـ API السريع)
+        // 2. فيديوهات تيك توك القصيرة العادية (سريعة جداً بدون متصفح)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. البث المباشر لتيك توك أو أي منصة معقدة (فيسبوك، إنستجرام) يتم قنصها بالـ WebView
-        Toast.makeText(this, "جاري قنص رابط البث للشاشة...", Toast.LENGTH_SHORT).show();
+        // 3. البث المباشر (TikTok Live) وأي فيديو معقد من فيسبوك وإنستجرام
+        Toast.makeText(this, "جاري قنص البث للشاشة...", Toast.LENGTH_SHORT).show();
         startSniffing(url);
     }
 
@@ -105,7 +121,7 @@ public class ShareActivity extends Activity {
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    startSniffing(url);
+                    mainHandler.post(() -> startSniffing(url));
                 }
 
                 @Override
@@ -138,36 +154,66 @@ public class ShareActivity extends Activity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+        // تعيين User-Agent احترافي لمتصفح حاسوب كامل لتجاوز قيود الموبايل وفتح البث فوراً
+        settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String reqUrl = request.getUrl().toString();
-                
-                // قنص روابط البث الحي وملفات الفيديو المباشرة
-                if (!isCaptured && (reqUrl.contains(".m3u8") || reqUrl.contains(".flv") || reqUrl.contains(".mp4") || reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls"))) {
-                    isCaptured = true;
-                    mainHandler.post(() -> {
-                        sendToTv(targetTvIp, reqUrl);
-                        destroyWebView();
-                    });
+                String reqUrl = request.getUrl().toString().toLowerCase();
+
+                // قنص عناوين وتدفقات البث المباشر المتقدمة (تيك توك / فيسبوك / إنستجرام)
+                boolean isMediaStream = reqUrl.contains(".m3u8") ||
+                        reqUrl.contains(".flv") ||
+                        reqUrl.contains("pull-flv") ||
+                        reqUrl.contains("pull-hls") ||
+                        reqUrl.contains("live-hls") ||
+                        reqUrl.contains(".mp4") ||
+                        reqUrl.contains("/live/") && reqUrl.contains("play");
+
+                // استبعاد ملفات الصور والصوتيات الثانوية والتتبعات
+                if (isMediaStream && !reqUrl.contains(".jpg") && !reqUrl.contains(".png") && !reqUrl.contains("analytics")) {
+                    if (!isCaptured) {
+                        isCaptured = true;
+                        mainHandler.post(() -> {
+                            sendToTv(targetTvIp, request.getUrl().toString());
+                            destroyWebView();
+                        });
+                    }
                 }
                 return super.shouldInterceptRequest(view, request);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // محاكاة الضغط التلقائي لتشغيل أي زر فيديو أو إغلاق نوافذ "افتح التطبيق"
+                view.evaluateJavascript(
+                        "(function() { " +
+                        "   var videos = document.getElementsByTagName('video'); " +
+                        "   for (var i=0; i<videos.length; i++) { videos[i].play(); } " +
+                        "   var btns = document.querySelectorAll('button, div'); " +
+                        "   for (var j=0; j<btns.length; j++) { " +
+                        "       if (btns[j].innerText && (btns[j].innerText.includes('Play') || btns[j].innerText.includes('تشغيل'))) { " +
+                        "           btns[j].click(); " +
+                        "       } " +
+                        "   } " +
+                        "})();", null);
             }
         });
 
         webView.loadUrl(url);
 
-        // مهلة حماية 20 ثانية لإغلاق الصفحة لو لم يتم العثور على بث
+        // مهلة 18 ثانية في حالة فشل القنص
         mainHandler.postDelayed(() -> {
             if (!isCaptured) {
-                Toast.makeText(ShareActivity.this, "تعذر قنص البث، تأكد من أن الرابط مباشر", Toast.LENGTH_SHORT).show();
+                Toast.makeText(ShareActivity.this, "تعذر قنص البث، تأكد من أن الرابط مباشر ومتاح", Toast.LENGTH_SHORT).show();
                 destroyWebView();
                 finish();
             }
-        }, 20000);
+        }, 18000);
     }
 
     private void destroyWebView() {
@@ -202,7 +248,7 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onResponse(Call call, Response response) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تم قنص الفيديو وتشغيله على الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تم قنص البث وتشغيله على الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
