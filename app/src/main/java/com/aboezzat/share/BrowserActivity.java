@@ -202,7 +202,25 @@ public class BrowserActivity extends Activity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        webView.addJavascriptInterface(new WebAppInterface(), "AboEzzatBridge");
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onVideoPlaying(String mediaUrl, String title) {
+                if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
+                    addCapturedMedia(mediaUrl, title);
+                }
+            }
+
+            @JavascriptInterface
+            public void onNewCustomSite(String name, String siteUrl) {
+                saveCustomSite(name, siteUrl);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        loadHomePage();
+                    }
+                });
+            }
+        }, "AboEzzatBridge");
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -278,31 +296,19 @@ public class BrowserActivity extends Activity {
         }
     }
 
-    public class WebAppInterface {
-        @JavascriptInterface
-        public void onVideoPlaying(String mediaUrl, String title) {
-            if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
-                addCapturedMedia(mediaUrl, title);
-            }
-        }
-
-        @JavascriptInterface
-        public void onNewCustomSite(String name, String siteUrl) {
-            saveCustomSite(name, siteUrl);
-            runOnUiThread(() -> loadHomePage());
-        }
-    }
-
     private synchronized void addCapturedMedia(String url, String title) {
         for (CapturedMedia item : capturedList) {
             if (item.url.equalsIgnoreCase(url)) return;
         }
         String cleanTitle = (title != null && !title.isEmpty()) ? title : "مقطع فيديو";
         capturedList.add(0, new CapturedMedia(url, cleanTitle));
-        runOnUiThread(() -> {
-            btnCast.setText("📺 " + capturedList.size());
-            btnCast.setTextColor(Color.BLACK);
-            btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                btnCast.setText("📺 " + capturedList.size());
+                btnCast.setTextColor(Color.BLACK);
+                btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
+            }
         });
     }
 
@@ -359,7 +365,7 @@ public class BrowserActivity extends Activity {
         etUrl.setText("");
 
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
-        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<>());
+        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<String>());
 
         StringBuilder customCards = new StringBuilder();
         for (String entry : customSites) {
@@ -405,7 +411,7 @@ public class BrowserActivity extends Activity {
 
     private void saveCustomSite(String name, String url) {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
-        Set<String> set = new HashSet<>(prefs.getStringSet("custom_sites", new HashSet<>()));
+        Set<String> set = new HashSet<>(prefs.getStringSet("custom_sites", new HashSet<String>()));
         set.add(name + "|" + url);
         prefs.edit().putStringSet("custom_sites", set).apply();
     }
@@ -465,7 +471,4 @@ public class BrowserActivity extends Activity {
                 endpoint = "http://" + endpoint;
             }
             if (!endpoint.contains(":8080")) {
-                endpoint = endpoint + ":8080";
-            }
-
-            String
+                endpoint =
