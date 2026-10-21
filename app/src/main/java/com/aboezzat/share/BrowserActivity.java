@@ -16,7 +16,6 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.inputmethod.EditorInfo;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
@@ -251,3 +250,415 @@ public class BrowserActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                String targetUrl = request.getUrl().toString();
+
+                if (targetUrl.startsWith("intent://") || targetUrl.startsWith("snssdk") || !targetUrl.startsWith("http")) {
+                    if (targetUrl.contains("threads.net") || targetUrl.contains("threads.com")) {
+                        view.loadUrl("https://www.threads.net");
+                        return true;
+                    }
+                    if (targetUrl.contains("tiktok.com")) {
+                        view.loadUrl("https://www.tiktok.com");
+                        return true;
+                    }
+                    try {
+                        Intent intent = Intent.parseUri(targetUrl, Intent.URI_INTENT_SCHEME);
+                        String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                        if (fallbackUrl != null) {
+                            view.loadUrl(fallbackUrl);
+                            return true;
+                        }
+                    } catch (Exception ignored) {}
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String reqUrl = request.getUrl().toString().toLowerCase();
+
+                for (String ad : adDomains) {
+                    if (reqUrl.contains(ad)) {
+                        return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
+                    }
+                }
+
+                if ((reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls") || reqUrl.contains(".m3u8")) &&
+                        !reqUrl.contains(".ts") && !reqUrl.contains("seg-") && !reqUrl.contains("bytestart")) {
+                    addCapturedMedia(request.getUrl().toString(), view.getTitle());
+                }
+
+                return super.shouldInterceptRequest(view, request);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String loadedUrl) {
+                super.onPageFinished(view, loadedUrl);
+                if (getCurrentWebView() == view) {
+                    etUrl.setText(loadedUrl.equals("about:home") ? "" : loadedUrl);
+                    tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
+                }
+            }
+        });
+
+        tabList.add(webView);
+        tabTitles.add("علامة تبويب");
+        webContainer.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        switchToTab(tabList.size() - 1);
+        if (url.equals("about:home")) {
+            loadHomePage();
+        } else {
+            loadTargetUrl(url);
+        }
+    }
+
+    private class JsBridge {
+        @JavascriptInterface
+        public void onVideoPlaying(String mediaUrl, String title) {
+            if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
+                addCapturedMedia(mediaUrl, title);
+            }
+        }
+
+        @JavascriptInterface
+        public void onNewCustomSite(String name, String siteUrl) {
+            saveCustomSite(name, siteUrl);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    loadHomePage();
+                }
+            });
+        }
+    }
+
+    private synchronized void addCapturedMedia(String url, String title) {
+        for (CapturedMedia item : capturedList) {
+            if (item.url.equalsIgnoreCase(url)) return;
+        }
+        String cleanTitle = (title != null && !title.isEmpty()) ? title : "مقطع فيديو";
+        capturedList.add(0, new CapturedMedia(url, cleanTitle));
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                btnCast.setText("📺 " + capturedList.size());
+                btnCast.setTextColor(Color.BLACK);
+                btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
+            }
+        });
+    }
+
+    private WebView getCurrentWebView() {
+        if (currentTabIndex >= 0 && currentTabIndex < tabList.size()) {
+            return tabList.get(currentTabIndex);
+        }
+        return null;
+    }
+
+    private void switchToTab(int index) {
+        if (index < 0 || index >= tabList.size()) return;
+        currentTabIndex = index;
+        for (int i = 0; i < tabList.size(); i++) {
+            tabList.get(i).setVisibility(i == index ? View.VISIBLE : View.GONE);
+        }
+        WebView current = getCurrentWebView();
+        if (current != null) {
+            String u = current.getUrl();
+            etUrl.setText((u == null || u.equals("about:home")) ? "" : u);
+        }
+        btnTabs.setText("[ " + tabList.size() + " ]");
+    }
+
+    private void loadTargetUrl(String target) {
+        WebView current = getCurrentWebView();
+        if (current == null || target.isEmpty()) return;
+
+        capturedList.clear();
+        btnCast.setText("📺 0");
+        btnCast.setTextColor(Color.LTGRAY);
+        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+
+        if (!target.startsWith("http://") && !target.startsWith("https://")) {
+            try {
+                target = "https://www.google.com.eg/search?q=" + URLEncoder.encode(target, "UTF-8");
+            } catch (Exception e) {
+                target = "https://www.google.com.eg/search?q=" + target;
+            }
+        }
+        etUrl.setText(target);
+
+        Map<String, String> extraHeaders = new HashMap<String, String>();
+        extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
+        extraHeaders.put("X-Forwarded-For", "156.210.12.1");
+
+        current.loadUrl(target, extraHeaders);
+    }
+
+    private void loadHomePage() {
+        WebView current = getCurrentWebView();
+        if (current == null) return;
+
+        capturedList.clear();
+        btnCast.setText("📺 0");
+        btnCast.setTextColor(Color.LTGRAY);
+        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+        etUrl.setText("");
+
+        SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
+        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<String>());
+
+        StringBuilder customCards = new StringBuilder();
+        if (customSites != null) {
+            for (String entry : customSites) {
+                String[] parts = entry.split("\\|", 2);
+                if (parts.length == 2) {
+                    customCards.append("<a href='").append(parts[1]).append("' class='card'>").append(parts[0]).append("</a>");
+                }
+            }
+        }
+
+        String homeHtml = "<html dir='rtl'><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+                "<style>body{background:#121212;color:white;font-family:sans-serif;text-align:center;padding:15px;margin:0;}" +
+                ".grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-top:20px;}" +
+                ".card{background:#1E1E1E;padding:14px 5px;border-radius:10px;text-decoration:none;color:white;font-size:13px;display:block;border:1px solid #333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+                ".add-btn{background:#00897B;padding:12px;border-radius:10px;color:white;display:block;margin-top:20px;text-decoration:none;font-weight:bold;cursor:pointer;}" +
+                ".search-box{width:92%;padding:12px;border-radius:25px;border:none;margin-top:20px;font-size:14px;text-align:center;background:#2A2A2A;color:white;outline:none;}" +
+                "</style></head><body>" +
+                "<h3 style='color:#00B0FF;margin-top:15px;'>Abo Ezzat Browser</h3>" +
+                "<form action='https://www.google.com.eg/search' method='get'>" +
+                "<input type='text' name='q' class='search-box' placeholder='ابحث في جوجل مصر...'>" +
+                "</form>" +
+                "<div class='grid'>" +
+                "<a href='https://www.tiktok.com' class='card'>تيك توك</a>" +
+                "<a href='https://www.facebook.com' class='card'>فيسبوك</a>" +
+                "<a href='https://www.instagram.com' class='card'>إنستجرام</a>" +
+                "<a href='https://m.youtube.com' class='card'>يوتيوب</a>" +
+                "<a href='https://www.threads.net' class='card'>ثريد</a>" +
+                "<a href='https://x.com' class='card'>تويتر / X</a>" +
+                customCards.toString() +
+                "</div>" +
+                "<div class='add-btn' onclick='promptAddSite()'>➕ إضافة موقع جديد للرئيسية</div>" +
+                "<script>" +
+                "function promptAddSite() {" +
+                "  var n = prompt('اكتب اسم الموقع:');" +
+                "  if(n) {" +
+                "    var u = prompt('اكتب رابط الموقع:', 'https://');" +
+                "    if(u) { window.AboEzzatBridge.onNewCustomSite(n, u); }" +
+                "  }" +
+                "}" +
+                "</script></body></html>";
+
+        current.loadDataWithBaseURL("https://www.google.com.eg", homeHtml, "text/html", "UTF-8", null);
+    }
+
+    private void saveCustomSite(String name, String url) {
+        SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
+        Set<String> set = new HashSet<String>(prefs.getStringSet("custom_sites", new HashSet<String>()));
+        set.add(name + "|" + url);
+        prefs.edit().putStringSet("custom_sites", set).apply();
+    }
+
+    private void showMediaListDialog() {
+        if (capturedList.isEmpty()) {
+            Toast.makeText(this, "لا توجد فيديوهات مكتشفة في هذه الصفحة", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] items = new String[capturedList.size()];
+        for (int i = 0; i < capturedList.size(); i++) {
+            items[i] = (i + 1) + ". " + capturedList.get(i).title;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("اختر الفيديو (" + capturedList.size() + ")")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        showMediaOptionsDialog(capturedList.get(which));
+                    }
+                })
+                .setPositiveButton("مسح القائمة", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        capturedList.clear();
+                        btnCast.setText("📺 0");
+                        btnCast.setTextColor(Color.LTGRAY);
+                        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+                    }
+                })
+                .show();
+    }
+
+    private void showMediaOptionsDialog(final CapturedMedia media) {
+        String[] options = {
+                "📺 بث للشاشة الآن (Cast to TV)",
+                "🎬 تحميل الفيديو بأعلى جودة (Full HD MP4)",
+                "🎵 تحميل الصوت فقط (Audio MP3)"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle(media.title)
+                .setItems(options, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        if (which == 0) {
+                            castToTv(media.url);
+                        } else if (which == 1) {
+                            downloadMedia(media.url, false);
+                        } else if (which == 2) {
+                            downloadMedia(media.url, true);
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void castToTv(String mediaUrl) {
+        if (tvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين IP الشاشة من القائمة الرئيسية أولاً", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+                endpoint = "http://" + endpoint;
+            }
+            if (!endpoint.contains(":8080")) {
+                endpoint = endpoint + ":8080";
+            }
+
+            String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
+            Request req = new Request.Builder().url(fullUrl).build();
+            client.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الـ IP", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(BrowserActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            });
+        } catch (Exception e) {
+            Toast.makeText(this, "خطأ في الرابط", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void downloadMedia(String mediaUrl, boolean audioOnly) {
+        try {
+            if (mediaUrl.contains(".m3u8") || mediaUrl.contains("pull-flv")) {
+                Toast.makeText(this, "البث المباشر الحي يبث للشاشة فقط ولا يتم تنزيله", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            String ext = audioOnly ? ".mp3" : ".mp4";
+            String title = audioOnly ? "تحميل صوت - Abo Ezzat" : "تحميل فيديو - Abo Ezzat";
+
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(mediaUrl));
+            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI | DownloadManager.Request.NETWORK_MOBILE);
+            request.setTitle(title);
+            request.setDescription("جاري تنزيل الملف...");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AboEzzat_" + System.currentTimeMillis() + ext);
+
+            DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (manager != null) {
+                manager.enqueue(request);
+                Toast.makeText(this, "بدأ التنزيل بنجاح في مجلد Downloads ✓", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "تعذر بدء التنزيل", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showSideMenu() {
+        String[] menuItems = {
+                "➕ فتح علامة تبويب جديدة",
+                "🔄 تحديث الصفحة",
+                "🧹 مسح الكوكيز والبيانات المسجلة"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("القائمة الجانبية")
+                .setItems(menuItems, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        if (which == 0) {
+                            addNewTab("about:home");
+                        } else if (which == 1) {
+                            WebView current = getCurrentWebView();
+                            if (current != null) current.reload();
+                        } else if (which == 2) {
+                            CookieManager.getInstance().removeAllCookies(null);
+                            CookieManager.getInstance().flush();
+                            Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void showTabsDialog() {
+        String[] titles = new String[tabList.size()];
+        for (int i = 0; i < tabList.size(); i++) {
+            titles[i] = (i + 1) + ". " + tabTitles.get(i);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("علامات التبويب المفتوحة (" + tabList.size() + ")");
+        builder.setItems(titles, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                switchToTab(which);
+            }
+        });
+        builder.setPositiveButton("➕ علامة تبويب جديدة", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                addNewTab("about:home");
+            }
+        });
+        if (tabList.size() > 1) {
+            builder.setNegativeButton("✖ إغلاق التبويب الحالي", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    closeCurrentTab();
+                }
+            });
+        }
+        builder.show();
+    }
+
+    private void closeCurrentTab() {
+        if (tabList.size() <= 1) return;
+        WebView toRemove = tabList.remove(currentTabIndex);
+        tabTitles.remove(currentTabIndex);
+        webContainer.removeView(toRemove);
+        toRemove.destroy();
+        switchToTab(Math.max(0, currentTabIndex - 1));
+    }
+
+    @Override
+    public void onBackPressed() {
+        WebView current = getCurrentWebView();
+        if (current != null && current.canGoBack()) {
+            current.goBack();
+        } else if (tabList.size() > 1) {
+            closeCurrentTab();
+        } else {
+            super.onBackPressed();
+        }
+    }
+}
