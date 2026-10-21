@@ -31,6 +31,7 @@ import android.widget.Toast;
 
 import java.io.ByteArrayInputStream;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -42,22 +43,26 @@ import okhttp3.Response;
 
 public class BrowserActivity extends Activity {
 
-    private WebView webView;
-    private Button btnSniff;
+    private final List<WebView> tabList = new ArrayList<>();
+    private final List<String> tabTitles = new ArrayList<>();
+    private int currentTabIndex = -1;
+
+    private FrameLayout webContainer;
     private EditText etUrl;
-    private LinearLayout homeShortcuts;
-    private String currentActiveMediaUrl = "";
-    private String currentActiveTitle = "";
+    private Button btnCast;
+    private Button btnTabs;
+
+    private String activeMediaUrl = "";
+    private String activeMediaTitle = "";
+
     private final OkHttpClient client = new OkHttpClient();
     private String tvIp = "";
 
-    // قائمة سيرفرات الإعلانات لحجبها تلقائياً
     private final List<String> adDomains = Arrays.asList(
             "doubleclick.net", "googleads.g.doubleclick.net", "pagead2.googlesyndication.com",
             "adservice.google.com", "googletagmanager.com", "adcolony.com", "criteo.com"
     );
 
-    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -65,203 +70,183 @@ public class BrowserActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         tvIp = prefs.getString("tv_ip", "").trim();
 
-        LinearLayout mainLayout = new LinearLayout(this);
-        mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setBackgroundColor(Color.parseColor("#F5F5F5"));
+        LinearLayout rootLayout = new LinearLayout(this);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        rootLayout.setBackgroundColor(Color.parseColor("#121212"));
 
-        // 1. شريط التحكم العلوي المتطور
+        // 1. الشريط العلوي (Top Bar)
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setPadding(10, 10, 10, 10);
-        topBar.setBackgroundColor(Color.parseColor("#FFFFFF"));
+        topBar.setPadding(8, 8, 8, 8);
+        topBar.setBackgroundColor(Color.parseColor("#1F1F1F"));
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
 
-        Button btnHome = new Button(this);
-        btnHome.setText("🏠");
-        btnHome.setTextSize(16);
-        btnHome.setOnClickListener(v -> showHomePage());
-        topBar.addView(btnHome, new LinearLayout.LayoutParams(120, ViewGroup.LayoutParams.WRAP_CONTENT));
+        Button btnMenu = new Button(this);
+        btnMenu.setText("☰");
+        btnMenu.setTextColor(Color.WHITE);
+        btnMenu.setBackgroundColor(Color.TRANSPARENT);
+        btnMenu.setTextSize(20);
+        btnMenu.setOnClickListener(v -> showSideMenu());
+        topBar.addView(btnMenu, new LinearLayout.LayoutParams(110, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        etUrl = new EditText(this);
+        etUrl.setHint("اكتب الرابط أو ابحث...");
+        etUrl.setHintTextColor(Color.GRAY);
+        etUrl.setTextColor(Color.WHITE);
+        etUrl.setTextSize(13);
+        etUrl.setSingleLine(true);
+        etUrl.setBackgroundColor(Color.parseColor("#2A2A2A"));
+        etUrl.setPadding(15, 10, 15, 10);
+        LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        urlParams.setMargins(5, 0, 5, 0);
+        etUrl.setOnEditorActionListener((v, actionId, event) -> {
+            loadTargetUrl(etUrl.getText().toString().trim());
+            return true;
+        });
+        topBar.addView(etUrl, urlParams);
 
         Button btnRefresh = new Button(this);
         btnRefresh.setText("🔄");
         btnRefresh.setTextSize(16);
-        btnRefresh.setOnClickListener(v -> webView.reload());
-        topBar.addView(btnRefresh, new LinearLayout.LayoutParams(120, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        etUrl = new EditText(this);
-        etUrl.setHint("اكتب الرابط أو ابحث...");
-        etUrl.setTextSize(14);
-        etUrl.setSingleLine(true);
-        LinearLayout.LayoutParams etParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-        etParams.setMargins(5, 0, 5, 0);
-        topBar.addView(etUrl, etParams);
-
-        Button btnGo = new Button(this);
-        btnGo.setText("فتح");
-        btnGo.setOnClickListener(v -> {
-            String target = etUrl.getText().toString().trim();
-            loadTargetUrl(target);
+        btnRefresh.setTextColor(Color.WHITE);
+        btnRefresh.setBackgroundColor(Color.TRANSPARENT);
+        btnRefresh.setOnClickListener(v -> {
+            WebView currentWeb = getCurrentWebView();
+            if (currentWeb != null) currentWeb.reload();
         });
-        topBar.addView(btnGo, new LinearLayout.LayoutParams(140, ViewGroup.LayoutParams.WRAP_CONTENT));
-        mainLayout.addView(topBar);
+        topBar.addView(btnRefresh, new LinearLayout.LayoutParams(110, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        // 2. اختصارات المواقع السريعة
-        homeShortcuts = new LinearLayout(this);
-        homeShortcuts.setOrientation(LinearLayout.HORIZONTAL);
-        homeShortcuts.setPadding(10, 15, 10, 15);
-        homeShortcuts.setBackgroundColor(Color.parseColor("#EAEAEA"));
+        btnCast = new Button(this);
+        btnCast.setText("📺 0");
+        btnCast.setTextSize(13);
+        btnCast.setTextColor(Color.LTGRAY);
+        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+        btnCast.setOnClickListener(v -> showMediaOptionsDialog());
+        topBar.addView(btnCast, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        HorizontalScrollView scrollShortcuts = new HorizontalScrollView(this);
-        scrollShortcuts.addView(homeShortcuts);
+        rootLayout.addView(topBar);
 
-        addShortcut("تيك توك", "https://www.tiktok.com");
-        addShortcut("إنستجرام", "https://www.instagram.com");
-        addShortcut("فيسبوك", "https://www.facebook.com");
-        addShortcut("يوتيوب", "https://m.youtube.com");
-        addShortcut("ثريد", "https://www.threads.net");
-        addShortcut("تويتر / X", "https://x.com");
-        mainLayout.addView(scrollShortcuts);
+        // 2. حاوية صفحات التبويبات المتعددة
+        webContainer = new FrameLayout(this);
+        rootLayout.addView(webContainer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
 
-        // 3. مساحة المتصفح والزر العائم
-        FrameLayout webContainer = new FrameLayout(this);
+        // 3. الشريط السفلي (Bottom Bar)
+        LinearLayout bottomBar = new LinearLayout(this);
+        bottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomBar.setBackgroundColor(Color.parseColor("#1F1F1F"));
+        bottomBar.setPadding(10, 5, 10, 5);
+        bottomBar.setGravity(Gravity.CENTER);
 
-        webView = new WebView(this);
+        Button btnBack = createBottomButton("◀", v -> {
+            WebView currentWeb = getCurrentWebView();
+            if (currentWeb != null && currentWeb.canGoBack()) currentWeb.goBack();
+        });
+        bottomBar.addView(btnBack);
+
+        Button btnForward = createBottomButton("▶", v -> {
+            WebView currentWeb = getCurrentWebView();
+            if (currentWeb != null && currentWeb.canGoForward()) currentWeb.goForward();
+        });
+        bottomBar.addView(btnForward);
+
+        Button btnHome = createBottomButton("🏠", v -> loadHomePage());
+        bottomBar.addView(btnHome);
+
+        btnTabs = createBottomButton("[ 1 ]", v -> showTabsDialog());
+        bottomBar.addView(btnTabs);
+
+        rootLayout.addView(bottomBar);
+
+        setContentView(rootLayout);
+
+        // فتح أول علامة تبويب افتراضياً
+        addNewTab("https://www.google.com");
+    }
+
+    private Button createBottomButton(String text, View.OnClickListener listener) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setTextColor(Color.WHITE);
+        btn.setTextSize(16);
+        btn.setBackgroundColor(Color.TRANSPARENT);
+        btn.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        btn.setOnClickListener(listener);
+        return btn;
+    }
+
+    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
+    private void addNewTab(String url) {
+        WebView webView = new WebView(this);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        // ضبط الشاشة لمقاس الموبايل بالضبط
+        // ضبط الصفحة لتناسب شاشة الموبايل تماماً وتمنع الخروج يميناً ويساراً
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setSupportZoom(true);
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
-
-        // هوية متصفح أندرويد حديث لمقاسات طبيعية
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
 
-        // حفظ الكوكيز وتسجيل الدخول بشكل دائم
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        // جسر جافاسكريبت لالتقاط الفيديو الذي يتم تشغيله أمام عينك فقط
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onVideoPlaying(String mediaUrl, String title) {
                 if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
-                    currentActiveMediaUrl = mediaUrl;
-                    currentActiveTitle = (title != null && !title.isEmpty()) ? title : "الفيديو المعروض حالياً";
+                    activeMediaUrl = mediaUrl;
+                    activeMediaTitle = (title != null && !title.isEmpty()) ? title : "الفيديو المعروض حالياً";
                     runOnUiThread(() -> {
-                        btnSniff.setText("▶ بث الفيديو الحالي الشغال");
-                        btnSniff.setVisibility(View.VISIBLE);
+                        btnCast.setText("📺 1");
+                        btnCast.setTextColor(Color.BLACK);
+                        btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
                     });
                 }
             }
         }, "AboEzzatPlayer");
 
-        webContainer.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // الزر العائم الأنيق (يظهر فقط مع الفيديو الشغال حالياً)
-        btnSniff = new Button(this);
-        btnSniff.setText("▶ بث الفيديو الحالي");
-        btnSniff.setBackgroundColor(Color.parseColor("#00897B"));
-        btnSniff.setTextColor(Color.WHITE);
-        btnSniff.setPadding(30, 15, 30, 15);
-        btnSniff.setVisibility(View.GONE);
-        FrameLayout.LayoutParams fabParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        fabParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        fabParams.setMargins(0, 0, 0, 50);
-        btnSniff.setLayoutParams(fabParams);
-        btnSniff.setOnClickListener(v -> showActionDialog());
-        webContainer.addView(btnSniff);
-
-        mainLayout.addView(webContainer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        setContentView(mainLayout);
-
-        setupSnifferAndAdBlock();
-
-        showHomePage();
-    }
-
-    private void addShortcut(String name, String url) {
-        Button btn = new Button(this);
-        btn.setText(name);
-        btn.setTextSize(12);
-        btn.setBackgroundColor(Color.WHITE);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(8, 0, 8, 0);
-        btn.setLayoutParams(params);
-        btn.setOnClickListener(v -> loadTargetUrl(url));
-        homeShortcuts.addView(btn);
-    }
-
-    private void showHomePage() {
-        btnSniff.setVisibility(View.GONE);
-        currentActiveMediaUrl = "";
-        String homeHtml = "<html dir='rtl'><body style='background:#121212;color:white;font-family:sans-serif;text-align:center;padding:50px 20px;'>" +
-                "<h2 style='color:#00B0FF;'>Abo Ezzat Browser</h2>" +
-                "<p style='color:#AAA;'>اختر من المواقع بالأعلى أو اكتب أي رابط للتصفح بدون إعلانات</p>" +
-                "</body></html>";
-        webView.loadDataWithBaseURL("https://www.google.com.eg", homeHtml, "text/html", "UTF-8", null);
-        etUrl.setText("");
-    }
-
-    private void loadTargetUrl(String target) {
-        if (!target.startsWith("http://") && !target.startsWith("https://")) {
-            target = "https://www.google.com.eg/search?q=" + URLEncoder.encode(target);
-        }
-        etUrl.setText(target);
-        btnSniff.setVisibility(View.GONE);
-        currentActiveMediaUrl = "";
-
-        // تثبيت لغة وتوجيه مصر عند طلب الموقع
-        java.util.Map<String, String> extraHeaders = new java.util.HashMap<>();
-        extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
-        extraHeaders.put("X-Forwarded-For", "156.210.12.1"); // نطاق IP مصري لتثبيت الدولة
-
-        webView.loadUrl(target, extraHeaders);
-    }
-
-    private void setupSnifferAndAdBlock() {
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString().toLowerCase();
 
-                // 1. حجب الإعلانات المزعجة
+                // حجب الإعلانات المزعجة
                 for (String ad : adDomains) {
                     if (reqUrl.contains(ad)) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
 
-                // 2. التقاط البثوث الحية المباشرة (Master Playlist أو FLV Live)
+                // قنص البث الحي الصريح
                 if ((reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls") || reqUrl.contains(".m3u8")) &&
                         !reqUrl.contains(".ts") && !reqUrl.contains("seg-") && !reqUrl.contains("bytestart")) {
-                    currentActiveMediaUrl = request.getUrl().toString();
+                    activeMediaUrl = request.getUrl().toString();
                     runOnUiThread(() -> {
-                        btnSniff.setText("▶ بث مباشر جاهز للتشغيل");
-                        btnSniff.setVisibility(View.VISIBLE);
+                        btnCast.setText("📺 1");
+                        btnCast.setTextColor(Color.BLACK);
+                        btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
                     });
                 }
-
                 return super.shouldInterceptRequest(view, request);
             }
 
             @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                etUrl.setText(url);
+            public void onPageFinished(WebView view, String loadedUrl) {
+                super.onPageFinished(view, loadedUrl);
+                if (getCurrentWebView() == view) {
+                    etUrl.setText(loadedUrl);
+                    tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
+                }
 
-                // كود جافاسكريبت يربط كل وسوم الفيديو بحدث Play الفعلي فقط
+                // ربط حدث Play بالزر العلوي فقط للفيديو الشغال
                 String js = "(function() { " +
-                        "   function attachListeners() { " +
+                        "   function scan() { " +
                         "       var vids = document.getElementsByTagName('video'); " +
                         "       for (var i = 0; i < vids.length; i++) { " +
                         "           if (!vids[i].hasAttribute('data-sniffed')) { " +
@@ -275,25 +260,164 @@ public class BrowserActivity extends Activity {
                         "           } " +
                         "       } " +
                         "   } " +
-                        "   attachListeners(); " +
-                        "   setInterval(attachListeners, 1500); " +
+                        "   scan(); " +
+                        "   setInterval(scan, 1200); " +
                         "})();";
                 view.evaluateJavascript(js, null);
             }
         });
+
+        tabList.add(webView);
+        tabTitles.add("علامة تبويب");
+        webContainer.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        switchToTab(tabList.size() - 1);
+        loadTargetUrl(url);
     }
 
-    private void showActionDialog() {
-        if (currentActiveMediaUrl.isEmpty()) return;
+    private WebView getCurrentWebView() {
+        if (currentTabIndex >= 0 && currentTabIndex < tabList.size()) {
+            return tabList.get(currentTabIndex);
+        }
+        return null;
+    }
 
-        String[] actions = {"بث للشاشة الآن (Cast)", "تحميل إلى الهاتف (Download)"};
+    private void switchToTab(int index) {
+        if (index < 0 || index >= tabList.size()) return;
+        currentTabIndex = index;
+        for (int i = 0; i < tabList.size(); i++) {
+            tabList.get(i).setVisibility(i == index ? View.VISIBLE : View.GONE);
+        }
+        WebView current = getCurrentWebView();
+        if (current != null) {
+            etUrl.setText(current.getUrl() != null ? current.getUrl() : "");
+        }
+        btnTabs.setText("[ " + tabList.size() + " ]");
+        resetCastButton();
+    }
+
+    private void resetCastButton() {
+        activeMediaUrl = "";
+        btnCast.setText("📺 0");
+        btnCast.setTextColor(Color.LTGRAY);
+        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+    }
+
+    private void loadTargetUrl(String target) {
+        WebView current = getCurrentWebView();
+        if (current == null || target.isEmpty()) return;
+
+        resetCastButton();
+
+        if (!target.startsWith("http://") && !target.startsWith("https://")) {
+            target = "https://www.google.com.eg/search?q=" + URLEncoder.encode(target);
+        }
+        etUrl.setText(target);
+
+        java.util.Map<String, String> extraHeaders = new java.util.HashMap<>();
+        extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
+        extraHeaders.put("X-Forwarded-For", "156.210.12.1");
+
+        current.loadUrl(target, extraHeaders);
+    }
+
+    private void loadHomePage() {
+        WebView current = getCurrentWebView();
+        if (current == null) return;
+        resetCastButton();
+        etUrl.setText("");
+
+        String homeHtml = "<html dir='rtl'><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+                "<style>body{background:#121212;color:white;font-family:sans-serif;text-align:center;padding:20px;}" +
+                ".grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:15px;margin-top:25px;}" +
+                ".card{background:#1E1E1E;padding:15px;border-radius:10px;text-decoration:none;color:white;font-size:14px;display:block;border:1px solid #333;}" +
+                ".search-box{width:90%;padding:12px;border-radius:25px;border:none;margin-top:20px;font-size:15px;text-align:center;background:#2A2A2A;color:white;}" +
+                "</style></head><body>" +
+                "<h2 style='color:#00B0FF;margin-top:20px;'>Abo Ezzat Browser</h2>" +
+                "<form action='https://www.google.com/search' method='get'>" +
+                "<input type='text' name='q' class='search-box' placeholder='ابحث في جوجل...'>" +
+                "</form>" +
+                "<div class='grid'>" +
+                "<a href='https://www.tiktok.com' class='card'>تيك توك</a>" +
+                "<a href='https://www.facebook.com' class='card'>فيسبوك</a>" +
+                "<a href='https://www.instagram.com' class='card'>إنستجرام</a>" +
+                "<a href='https://m.youtube.com' class='card'>يوتيوب</a>" +
+                "<a href='https://www.threads.net' class='card'>ثريد</a>" +
+                "<a href='https://x.com' class='card'>تويتر / X</a>" +
+                "</div></body></html>";
+
+        current.loadDataWithBaseURL("https://www.google.com.eg", homeHtml, "text/html", "UTF-8", null);
+    }
+
+    private void showSideMenu() {
+        String[] menuItems = {
+                "➕ فتح علامة تبويب جديدة",
+                "🔄 تحديث الصفحة",
+                "🧹 مسح الكوكيز والبيانات المسجلة"
+        };
         new AlertDialog.Builder(this)
-                .setTitle(currentActiveTitle)
-                .setItems(actions, (dialog, which) -> {
+                .setTitle("القائمة الجانبية")
+                .setItems(menuItems, (dialog, which) -> {
                     if (which == 0) {
-                        castToTv(currentActiveMediaUrl);
-                    } else {
-                        downloadMedia(currentActiveMediaUrl);
+                        addNewTab("https://www.google.com");
+                    } else if (which == 1) {
+                        WebView current = getCurrentWebView();
+                        if (current != null) current.reload();
+                    } else if (which == 2) {
+                        CookieManager.getInstance().removeAllCookies(null);
+                        CookieManager.getInstance().flush();
+                        Toast.makeText(this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .show();
+    }
+
+    private void showTabsDialog() {
+        String[] titles = new String[tabList.size()];
+        for (int i = 0; i < tabList.size(); i++) {
+            titles[i] = (i + 1) + ". " + tabTitles.get(i);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("علامات التبويب المفتوحة (" + tabList.size() + ")");
+        builder.setItems(titles, (dialog, which) -> switchToTab(which));
+        builder.setPositiveButton("➕ علامة تبويب جديدة", (dialog, which) -> addNewTab("https://www.google.com"));
+        if (tabList.size() > 1) {
+            builder.setNegativeButton("✖ إغلاق التبويب الحالي", (dialog, which) -> closeCurrentTab());
+        }
+        builder.show();
+    }
+
+    private void closeCurrentTab() {
+        if (tabList.size() <= 1) return;
+        WebView toRemove = tabList.remove(currentTabIndex);
+        tabTitles.remove(currentTabIndex);
+        webContainer.removeView(toRemove);
+        toRemove.destroy();
+        switchToTab(Math.max(0, currentTabIndex - 1));
+    }
+
+    private void showMediaOptionsDialog() {
+        if (activeMediaUrl.isEmpty()) {
+            Toast.makeText(this, "لا يوجد فيديو شغال حالياً في الصفحة", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] options = {
+                "📺 بث للشاشة الآن (Cast to TV)",
+                "🎬 تحميل الفيديو بأعلى جودة (Full HD MP4)",
+                "🎵 تحميل الصوت فقط (Audio MP3)"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle(activeMediaTitle)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        castToTv(activeMediaUrl);
+                    } else if (which == 1) {
+                        downloadMedia(activeMediaUrl, false);
+                    } else if (which == 2) {
+                        downloadMedia(activeMediaUrl, true);
                     }
                 })
                 .show();
@@ -301,7 +425,7 @@ public class BrowserActivity extends Activity {
 
     private void castToTv(String mediaUrl) {
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة من القائمة الرئيسية أولاً", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "يرجى تعيين IP الشاشة من القائمة الرئيسية أولاً", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
@@ -318,7 +442,7 @@ public class BrowserActivity extends Activity {
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, java.io.IOException e) {
-                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تعذر الإرسال: تأكد من الشاشة والـ IP", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الـ IP", Toast.LENGTH_SHORT).show());
                 }
 
                 @Override
@@ -331,34 +455,40 @@ public class BrowserActivity extends Activity {
         }
     }
 
-    private void downloadMedia(String mediaUrl) {
+    private void downloadMedia(String mediaUrl, boolean audioOnly) {
         try {
             if (mediaUrl.contains(".m3u8") || mediaUrl.contains("pull-flv")) {
-                Toast.makeText(this, "البث المباشر الحي يبث للشاشة فقط ولا يتم تنزيله كملف ثابت", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "البث المباشر الحي يبث للشاشة فقط ولا يتم تنزيله", Toast.LENGTH_LONG).show();
                 return;
             }
 
+            String ext = audioOnly ? ".mp3" : ".mp4";
+            String title = audioOnly ? "تحميل صوت - Abo Ezzat" : "تحميل فيديو - Abo Ezzat";
+
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(mediaUrl));
             request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI | DownloadManager.Request.NETWORK_MOBILE);
-            request.setTitle("تحميل فيديو - Abo Ezzat");
-            request.setDescription("جاري تنزيل الملف المباشر...");
+            request.setTitle(title);
+            request.setDescription("جاري تنزيل الملف...");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AboEzzat_" + System.currentTimeMillis() + ".mp4");
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "AboEzzat_" + System.currentTimeMillis() + ext);
 
             DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
             if (manager != null) {
                 manager.enqueue(request);
-                Toast.makeText(this, "بدأ التحميل بنجاح في مجلد Downloads ✓", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "بدأ التنزيل بنجاح في مجلد Downloads ✓", Toast.LENGTH_SHORT).show();
             }
         } catch (Exception e) {
-            Toast.makeText(this, "تعذر التنزيل المباشر", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "تعذر بدء التنزيل", Toast.LENGTH_SHORT).show();
         }
     }
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        WebView current = getCurrentWebView();
+        if (current != null && current.canGoBack()) {
+            current.goBack();
+        } else if (tabList.size() > 1) {
+            closeCurrentTab();
         } else {
             super.onBackPressed();
         }
