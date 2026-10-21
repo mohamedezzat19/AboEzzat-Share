@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -16,6 +17,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
@@ -56,7 +58,15 @@ public class BrowserActivity extends Activity {
     private final List<String> tabTitles = new ArrayList<>();
     private int currentTabIndex = -1;
 
+    private LinearLayout rootLayout;
+    private LinearLayout topBar;
+    private LinearLayout bottomBar;
     private FrameLayout webContainer;
+    private FrameLayout fullScreenContainer;
+
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
+
     private EditText etUrl;
     private Button btnCast;
     private Button btnTabs;
@@ -87,11 +97,11 @@ public class BrowserActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         tvIp = prefs.getString("tv_ip", "").trim();
 
-        LinearLayout rootLayout = new LinearLayout(this);
+        rootLayout = new LinearLayout(this);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
         rootLayout.setBackgroundColor(Color.parseColor("#121212"));
 
-        LinearLayout topBar = new LinearLayout(this);
+        topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setPadding(8, 8, 8, 8);
         topBar.setBackgroundColor(Color.parseColor("#1F1F1F"));
@@ -108,7 +118,7 @@ public class BrowserActivity extends Activity {
                 showSideMenu();
             }
         });
-        topBar.addView(btnMenu, new LinearLayout.LayoutParams(110, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.addView(btnMenu, new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         etUrl = new EditText(this);
         etUrl.setHint("اكتب الرابط أو ابحث...");
@@ -141,7 +151,7 @@ public class BrowserActivity extends Activity {
                 if (currentWeb != null) currentWeb.reload();
             }
         });
-        topBar.addView(btnRefresh, new LinearLayout.LayoutParams(110, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.addView(btnRefresh, new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         btnCast = new Button(this);
         btnCast.setText("📺 0");
@@ -158,10 +168,18 @@ public class BrowserActivity extends Activity {
 
         rootLayout.addView(topBar);
 
+        FrameLayout baseFrame = new FrameLayout(this);
         webContainer = new FrameLayout(this);
-        rootLayout.addView(webContainer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        fullScreenContainer = new FrameLayout(this);
+        fullScreenContainer.setVisibility(View.GONE);
+        fullScreenContainer.setBackgroundColor(Color.BLACK);
 
-        LinearLayout bottomBar = new LinearLayout(this);
+        baseFrame.addView(webContainer, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        baseFrame.addView(fullScreenContainer, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        rootLayout.addView(baseFrame, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+
+        bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setBackgroundColor(Color.parseColor("#1F1F1F"));
         bottomBar.setPadding(10, 5, 10, 5);
@@ -218,7 +236,7 @@ public class BrowserActivity extends Activity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void addNewTab(String url) {
-        WebView webView = new WebView(this);
+        final WebView webView = new WebView(this);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -231,6 +249,7 @@ public class BrowserActivity extends Activity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
 
+        // واجهة كروم أندرويد قياسية حديثة
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
         settings.setGeolocationEnabled(false);
 
@@ -245,6 +264,48 @@ public class BrowserActivity extends Activity {
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 callback.invoke(origin, false, false);
             }
+
+            // تفعيل الشاشة الكاملة لليوتيوب وتدوير الشاشة تلقائياً
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                if (customView != null) {
+                    onHideCustomView();
+                    return;
+                }
+                customView = view;
+                customViewCallback = callback;
+
+                topBar.setVisibility(View.GONE);
+                bottomBar.setVisibility(View.GONE);
+                webContainer.setVisibility(View.GONE);
+
+                fullScreenContainer.addView(customView);
+                fullScreenContainer.setVisibility(View.VISIBLE);
+
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                if (customView == null) return;
+
+                fullScreenContainer.removeView(customView);
+                fullScreenContainer.setVisibility(View.GONE);
+                customView = null;
+
+                if (customViewCallback != null) {
+                    customViewCallback.onCustomViewHidden();
+                    customViewCallback = null;
+                }
+
+                topBar.setVisibility(View.VISIBLE);
+                bottomBar.setVisibility(View.VISIBLE);
+                webContainer.setVisibility(View.VISIBLE);
+
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            }
         });
 
         webView.setWebViewClient(new WebViewClient() {
@@ -252,23 +313,8 @@ public class BrowserActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
 
+                // منع اللوب وإيقاف التحويل للتطبيقات بصمت تام دون إعادة تحميل
                 if (targetUrl.startsWith("intent://") || targetUrl.startsWith("snssdk") || !targetUrl.startsWith("http")) {
-                    if (targetUrl.contains("threads.net") || targetUrl.contains("threads.com")) {
-                        view.loadUrl("https://www.threads.net");
-                        return true;
-                    }
-                    if (targetUrl.contains("tiktok.com")) {
-                        view.loadUrl("https://www.tiktok.com");
-                        return true;
-                    }
-                    try {
-                        Intent intent = Intent.parseUri(targetUrl, Intent.URI_INTENT_SCHEME);
-                        String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                        if (fallbackUrl != null) {
-                            view.loadUrl(fallbackUrl);
-                            return true;
-                        }
-                    } catch (Exception ignored) {}
                     return true;
                 }
                 return false;
@@ -278,12 +324,14 @@ public class BrowserActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString().toLowerCase();
 
+                // فلترة الإعلانات
                 for (String ad : adDomains) {
                     if (reqUrl.contains(ad)) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
 
+                // قنص البث المباشر
                 if ((reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls") || reqUrl.contains(".m3u8")) &&
                         !reqUrl.contains(".ts") && !reqUrl.contains("seg-") && !reqUrl.contains("bytestart")) {
                     addCapturedMedia(request.getUrl().toString(), view.getTitle());
@@ -299,6 +347,32 @@ public class BrowserActivity extends Activity {
                     etUrl.setText(loadedUrl.equals("about:home") ? "" : loadedUrl);
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
+
+                // كود متقدم: إزالة إعلانات يوتيوب تلقائياً + قنص الفيديو المباشر الحقيقي
+                String js = "javascript:(function(){" +
+                        "function blockAndSniff(){" +
+                        // تخطي إعلانات يوتيوب فوراً
+                        "var ad=document.querySelector('.ad-showing, .ad-interrupting');" +
+                        "if(ad){var v=document.querySelector('video');if(v){v.currentTime=v.duration||100;}}" +
+                        "var skipBtn=document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
+                        "if(skipBtn){skipBtn.click();}" +
+                        // قنص مشغلات الفيديو النشطة
+                        "var vids=document.getElementsByTagName('video');" +
+                        "for(var i=0;i<vids.length;i++){" +
+                        "if(!vids[i].hasAttribute('data-sniffed')){" +
+                        "vids[i].setAttribute('data-sniffed','true');" +
+                        "vids[i].addEventListener('play',function(e){" +
+                        "for(var j=0;j<vids.length;j++){if(vids[j]!==e.target){vids[j].pause();}}" +
+                        "var src=e.target.currentSrc||e.target.src;" +
+                        "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
+                        "});" +
+                        "}" +
+                        "}" +
+                        "}" +
+                        "blockAndSniff();" +
+                        "setInterval(blockAndSniff,1000);" +
+                        "})()";
+                view.loadUrl(js);
             }
         });
 
@@ -460,9 +534,23 @@ public class BrowserActivity extends Activity {
         prefs.edit().putStringSet("custom_sites", set).apply();
     }
 
+    private void triggerManualSniff() {
+        WebView current = getCurrentWebView();
+        if (current == null) return;
+        Toast.makeText(this, "جاري فحص الفيديوهات في الصفحة...", Toast.LENGTH_SHORT).show();
+        String js = "javascript:(function(){" +
+                "var vids=document.getElementsByTagName('video');" +
+                "for(var i=0;i<vids.length;i++){" +
+                "var src=vids[i].currentSrc||vids[i].src;" +
+                "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
+                "}" +
+                "})()";
+        current.loadUrl(js);
+    }
+
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
-            Toast.makeText(this, "لا توجد فيديوهات مكتشفة في هذه الصفحة", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "لا توجد فيديوهات مكتشفة حالياً، جرب تشغيل الفيديو أولاً", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -472,7 +560,7 @@ public class BrowserActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle("اختر الفيديو (" + capturedList.size() + ")")
+                .setTitle("الفيديوهات المكتشفة (" + capturedList.size() + ")")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
@@ -586,6 +674,7 @@ public class BrowserActivity extends Activity {
 
     private void showSideMenu() {
         String[] menuItems = {
+                "🔍 فحص وقنص الفيديوهات الآن (Manual Sniff)",
                 "➕ فتح علامة تبويب جديدة",
                 "🔄 تحديث الصفحة",
                 "🧹 مسح الكوكيز والبيانات المسجلة"
@@ -596,11 +685,13 @@ public class BrowserActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         if (which == 0) {
-                            addNewTab("about:home");
+                            triggerManualSniff();
                         } else if (which == 1) {
+                            addNewTab("about:home");
+                        } else if (which == 2) {
                             WebView current = getCurrentWebView();
                             if (current != null) current.reload();
-                        } else if (which == 2) {
+                        } else if (which == 3) {
                             CookieManager.getInstance().removeAllCookies(null);
                             CookieManager.getInstance().flush();
                             Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
@@ -652,6 +743,14 @@ public class BrowserActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (customView != null) {
+            // إغلاق الشاشة الكاملة والعودة للوضع العادي
+            WebChromeClient client = getCurrentWebView() != null ? new WebChromeClient() : null;
+            if (customViewCallback != null) {
+                customViewCallback.onCustomViewHidden();
+            }
+            return;
+        }
         WebView current = getCurrentWebView();
         if (current != null && current.canGoBack()) {
             current.goBack();
