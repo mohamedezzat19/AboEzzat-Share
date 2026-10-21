@@ -250,8 +250,6 @@ public class BrowserActivity extends Activity {
         settings.setDisplayZoomControls(false);
 
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
-        
-        // تفعيل الموقع الجغرافي لدعم إحداثيات المنصورة الوهمية
         settings.setGeolocationEnabled(true);
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -263,7 +261,6 @@ public class BrowserActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
-                // قبول الإذن لتمكين حقن إحداثيات المنصورة
                 callback.invoke(origin, true, false);
             }
 
@@ -313,7 +310,9 @@ public class BrowserActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
-                if (targetUrl.startsWith("intent://") || targetUrl.startsWith("snssdk") || !targetUrl.startsWith("http")) {
+
+                // حظر روابط التحويل لتطبيقات الموبايل وإلغاء الشاشات البيضاء
+                if (targetUrl.contains("onelink.me") || targetUrl.contains("snssdk") || targetUrl.startsWith("intent://") || !targetUrl.startsWith("http")) {
                     return true;
                 }
                 return false;
@@ -345,7 +344,7 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // حقن إحداثيات المنصورة، الدقهلية، مصر وتخطي إعلانات يوتيوب وقنص الفيديو
+                // حقن إحداثيات المنصورة + إزالة نوافذ إجبار التطبيق في تيك توك + تخطي إعلانات يوتيوب + قنص الفيديوهات
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(success) {" +
@@ -353,11 +352,22 @@ public class BrowserActivity extends Activity {
                         "  success(pos);" +
                         "};" +
                         "}catch(e){}" +
-                        "function blockAndSniff(){" +
+                        "function cleanAndSniff(){" +
+                        // إزالة وحذف نوافذ تيك توك الإجبارية (Get App / Open App)
+                        "var popups = document.querySelectorAll('tiktok-cookie-banner, [class*=\"modal\"], [class*=\"banner\"], [class*=\"dialog\"], [class*=\"overlay\"]');" +
+                        "for(var p=0; p<popups.length; p++){" +
+                        "  if(popups[p].innerText && (popups[p].innerText.indexOf('التطبيق')!==-1 || popups[p].innerText.indexOf('TikTok')!==-1 || popups[p].innerText.indexOf('App')!==-1)){" +
+                        "    popups[p].remove();" +
+                        "  }" +
+                        "}" +
+                        "var closeBtns = document.querySelectorAll('[aria-label=\"Close\"], [class*=\"close\"], [data-e2e=\"modal-close-inner-button\"]');" +
+                        "for(var c=0; c<closeBtns.length; c++){ closeBtns[c].click(); }" +
+                        // تخطي إعلانات يوتيوب
                         "var ad=document.querySelector('.ad-showing, .ad-interrupting');" +
                         "if(ad){var v=document.querySelector('video');if(v){v.currentTime=v.duration||100;}}" +
                         "var skipBtn=document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
                         "if(skipBtn){skipBtn.click();}" +
+                        // قنص الفيديوهات
                         "var vids=document.getElementsByTagName('video');" +
                         "for(var i=0;i<vids.length;i++){" +
                         "if(!vids[i].hasAttribute('data-sniffed')){" +
@@ -370,8 +380,8 @@ public class BrowserActivity extends Activity {
                         "}" +
                         "}" +
                         "}" +
-                        "blockAndSniff();" +
-                        "setInterval(blockAndSniff,1000);" +
+                        "cleanAndSniff();" +
+                        "setInterval(cleanAndSniff,1000);" +
                         "})()";
                 view.loadUrl(js);
             }
