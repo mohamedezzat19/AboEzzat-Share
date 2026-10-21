@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -140,7 +141,6 @@ public class BrowserActivity extends Activity {
         });
         topBar.addView(etUrl, urlParams);
 
-        // زرار القنص اليدوي الفوري بجانب الرابط مباشرة بدلاً من زر التحديث
         btnSniff = new Button(this);
         btnSniff.setText("🎯");
         btnSniff.setTextSize(16);
@@ -240,6 +240,26 @@ public class BrowserActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled")
     private void addNewTab(String url) {
         final WebView webView = new WebView(this);
+        
+        // إصلاح لوحة المفاتيح والفوكس للمواقع
+        webView.setFocusable(true);
+        webView.setFocusableInTouchMode(true);
+        webView.requestFocus(View.FOCUS_DOWN);
+        webView.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                    case MotionEvent.ACTION_UP:
+                        if (!v.hasFocus()) {
+                            v.requestFocus();
+                        }
+                        break;
+                }
+                return false;
+            }
+        });
+
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -324,19 +344,18 @@ public class BrowserActivity extends Activity {
                 String reqUrl = request.getUrl().toString();
                 String lowerUrl = reqUrl.toLowerCase();
 
-                // حجب الإعلانات
                 for (String ad : adDomains) {
                     if (lowerUrl.contains(ad)) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
 
-                // قنص روابط البث وتدفقات الفيديو من الشبكة مباشرة (تيك توك، فيسبوك، سيرفرات الفيديو، والبث المباشر)
+                // إصلاح الـ Crash: عدم استدعاء view.getTitle() من خيط الشبكة
                 if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv") || 
                     lowerUrl.contains("videoplayback") || lowerUrl.contains("tiktokcdn.com") || lowerUrl.contains("fbcdn.net")) {
                     
                     if (!lowerUrl.contains(".ts") && !lowerUrl.contains("seg-") && !lowerUrl.contains("bytestart") && !lowerUrl.contains("adformat")) {
-                        addCapturedMedia(reqUrl, view.getTitle());
+                        addCapturedMedia(reqUrl, "مقطع فيديو نشط");
                     }
                 }
 
@@ -351,31 +370,13 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // كود فحص إحداثيات المنصورة + تنظيف نوافذ تيك توك + تخطي إعلانات يوتيوب + قنص الوسائط
+                // كود خفيف لا يعطل لوحة المفاتيح
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
                         "}catch(e){}" +
-                        "function cleanAndSniff(){" +
-                        // إزالة نوافذ تيك توك المنبثقة
-                        "var popups=document.querySelectorAll('tiktok-cookie-banner,[class*=\"modal\"],[class*=\"banner\"],[class*=\"dialog\"],[class*=\"overlay\"]');" +
-                        "for(var p=0;p<popups.length;p++){if(popups[p].innerText&&(popups[p].innerText.indexOf('التطبيق')!==-1||popups[p].innerText.indexOf('TikTok')!==-1||popups[p].innerText.indexOf('App')!==-1)){popups[p].remove();}}" +
-                        "var closeBtns=document.querySelectorAll('[aria-label=\"Close\"],[class*=\"close\"],[data-e2e=\"modal-close-inner-button\"]');" +
-                        "for(var c=0;c<closeBtns.length;c++){closeBtns[c].click();}" +
-                        // تخطي إعلانات يوتيوب
-                        "var ad=document.querySelector('.ad-showing,.ad-interrupting');" +
-                        "if(ad){var v=document.querySelector('video');if(v){v.currentTime=v.duration||100;}}" +
                         "var skipBtn=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern');" +
                         "if(skipBtn){skipBtn.click();}" +
-                        // قنص عناصر الفيديو في الصفحة
-                        "var vids=document.getElementsByTagName('video');" +
-                        "for(var i=0;i<vids.length;i++){" +
-                        "  var src=vids[i].currentSrc||vids[i].src;" +
-                        "  if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
-                        "}" +
-                        "}" +
-                        "cleanAndSniff();" +
-                        "setInterval(cleanAndSniff,1200);" +
                         "})()";
                 view.loadUrl(js);
             }
@@ -548,8 +549,7 @@ public class BrowserActivity extends Activity {
         WebView current = getCurrentWebView();
         if (current == null) return;
         Toast.makeText(this, "جاري قنص الفيديو النشط...", Toast.LENGTH_SHORT).show();
-        
-        // لو الصفحة الحالية يوتيوب وفيديو شغال، نلتقط رابط الصفحة الحالي أو رابط الـ video
+
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
             addCapturedMedia(curUrl, current.getTitle());
