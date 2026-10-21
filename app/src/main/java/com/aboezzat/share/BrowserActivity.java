@@ -68,6 +68,7 @@ public class BrowserActivity extends Activity {
     private WebChromeClient.CustomViewCallback customViewCallback;
 
     private EditText etUrl;
+    private Button btnSniff;
     private Button btnCast;
     private Button btnTabs;
 
@@ -118,7 +119,7 @@ public class BrowserActivity extends Activity {
                 showSideMenu();
             }
         });
-        topBar.addView(btnMenu, new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT));
+        topBar.addView(btnMenu, new LinearLayout.LayoutParams(95, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         etUrl = new EditText(this);
         etUrl.setHint("اكتب الرابط أو ابحث...");
@@ -139,19 +140,21 @@ public class BrowserActivity extends Activity {
         });
         topBar.addView(etUrl, urlParams);
 
-        Button btnRefresh = new Button(this);
-        btnRefresh.setText("🔄");
-        btnRefresh.setTextSize(16);
-        btnRefresh.setTextColor(Color.WHITE);
-        btnRefresh.setBackgroundColor(Color.TRANSPARENT);
-        btnRefresh.setOnClickListener(new View.OnClickListener() {
+        // زرار القنص اليدوي الفوري بجانب الرابط مباشرة بدلاً من زر التحديث
+        btnSniff = new Button(this);
+        btnSniff.setText("🎯");
+        btnSniff.setTextSize(16);
+        btnSniff.setTextColor(Color.WHITE);
+        btnSniff.setBackgroundColor(Color.parseColor("#D32F2F"));
+        btnSniff.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                WebView currentWeb = getCurrentWebView();
-                if (currentWeb != null) currentWeb.reload();
+                triggerManualSniff();
             }
         });
-        topBar.addView(btnRefresh, new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams sniffParams = new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sniffParams.setMargins(0, 0, 5, 0);
+        topBar.addView(btnSniff, sniffParams);
 
         btnCast = new Button(this);
         btnCast.setText("📺 0");
@@ -310,8 +313,6 @@ public class BrowserActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
-
-                // حظر روابط التحويل لتطبيقات الموبايل وإلغاء الشاشات البيضاء
                 if (targetUrl.contains("onelink.me") || targetUrl.contains("snssdk") || targetUrl.startsWith("intent://") || !targetUrl.startsWith("http")) {
                     return true;
                 }
@@ -320,17 +321,23 @@ public class BrowserActivity extends Activity {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String reqUrl = request.getUrl().toString().toLowerCase();
+                String reqUrl = request.getUrl().toString();
+                String lowerUrl = reqUrl.toLowerCase();
 
+                // حجب الإعلانات
                 for (String ad : adDomains) {
-                    if (reqUrl.contains(ad)) {
+                    if (lowerUrl.contains(ad)) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
 
-                if ((reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls") || reqUrl.contains(".m3u8")) &&
-                        !reqUrl.contains(".ts") && !reqUrl.contains("seg-") && !reqUrl.contains("bytestart")) {
-                    addCapturedMedia(request.getUrl().toString(), view.getTitle());
+                // قنص روابط البث وتدفقات الفيديو من الشبكة مباشرة (تيك توك، فيسبوك، سيرفرات الفيديو، والبث المباشر)
+                if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv") || 
+                    lowerUrl.contains("videoplayback") || lowerUrl.contains("tiktokcdn.com") || lowerUrl.contains("fbcdn.net")) {
+                    
+                    if (!lowerUrl.contains(".ts") && !lowerUrl.contains("seg-") && !lowerUrl.contains("bytestart") && !lowerUrl.contains("adformat")) {
+                        addCapturedMedia(reqUrl, view.getTitle());
+                    }
                 }
 
                 return super.shouldInterceptRequest(view, request);
@@ -344,44 +351,31 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // حقن إحداثيات المنصورة + إزالة نوافذ إجبار التطبيق في تيك توك + تخطي إعلانات يوتيوب + قنص الفيديوهات
+                // كود فحص إحداثيات المنصورة + تنظيف نوافذ تيك توك + تخطي إعلانات يوتيوب + قنص الوسائط
                 String js = "javascript:(function(){" +
                         "try{" +
-                        "navigator.geolocation.getCurrentPosition = function(success) {" +
-                        "  var pos = { coords: { latitude: 31.0409, longitude: 31.3785, accuracy: 20 } };" +
-                        "  success(pos);" +
-                        "};" +
+                        "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
                         "}catch(e){}" +
                         "function cleanAndSniff(){" +
-                        // إزالة وحذف نوافذ تيك توك الإجبارية (Get App / Open App)
-                        "var popups = document.querySelectorAll('tiktok-cookie-banner, [class*=\"modal\"], [class*=\"banner\"], [class*=\"dialog\"], [class*=\"overlay\"]');" +
-                        "for(var p=0; p<popups.length; p++){" +
-                        "  if(popups[p].innerText && (popups[p].innerText.indexOf('التطبيق')!==-1 || popups[p].innerText.indexOf('TikTok')!==-1 || popups[p].innerText.indexOf('App')!==-1)){" +
-                        "    popups[p].remove();" +
-                        "  }" +
-                        "}" +
-                        "var closeBtns = document.querySelectorAll('[aria-label=\"Close\"], [class*=\"close\"], [data-e2e=\"modal-close-inner-button\"]');" +
-                        "for(var c=0; c<closeBtns.length; c++){ closeBtns[c].click(); }" +
+                        // إزالة نوافذ تيك توك المنبثقة
+                        "var popups=document.querySelectorAll('tiktok-cookie-banner,[class*=\"modal\"],[class*=\"banner\"],[class*=\"dialog\"],[class*=\"overlay\"]');" +
+                        "for(var p=0;p<popups.length;p++){if(popups[p].innerText&&(popups[p].innerText.indexOf('التطبيق')!==-1||popups[p].innerText.indexOf('TikTok')!==-1||popups[p].innerText.indexOf('App')!==-1)){popups[p].remove();}}" +
+                        "var closeBtns=document.querySelectorAll('[aria-label=\"Close\"],[class*=\"close\"],[data-e2e=\"modal-close-inner-button\"]');" +
+                        "for(var c=0;c<closeBtns.length;c++){closeBtns[c].click();}" +
                         // تخطي إعلانات يوتيوب
-                        "var ad=document.querySelector('.ad-showing, .ad-interrupting');" +
+                        "var ad=document.querySelector('.ad-showing,.ad-interrupting');" +
                         "if(ad){var v=document.querySelector('video');if(v){v.currentTime=v.duration||100;}}" +
-                        "var skipBtn=document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
+                        "var skipBtn=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern');" +
                         "if(skipBtn){skipBtn.click();}" +
-                        // قنص الفيديوهات
+                        // قنص عناصر الفيديو في الصفحة
                         "var vids=document.getElementsByTagName('video');" +
                         "for(var i=0;i<vids.length;i++){" +
-                        "if(!vids[i].hasAttribute('data-sniffed')){" +
-                        "vids[i].setAttribute('data-sniffed','true');" +
-                        "vids[i].addEventListener('play',function(e){" +
-                        "for(var j=0;j<vids.length;j++){if(vids[j]!==e.target){vids[j].pause();}}" +
-                        "var src=e.target.currentSrc||e.target.src;" +
-                        "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
-                        "});" +
-                        "}" +
+                        "  var src=vids[i].currentSrc||vids[i].src;" +
+                        "  if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
                         "}" +
                         "}" +
                         "cleanAndSniff();" +
-                        "setInterval(cleanAndSniff,1000);" +
+                        "setInterval(cleanAndSniff,1200);" +
                         "})()";
                 view.loadUrl(js);
             }
@@ -424,6 +418,9 @@ public class BrowserActivity extends Activity {
             if (item.url.equalsIgnoreCase(url)) return;
         }
         String cleanTitle = (title != null && !title.isEmpty()) ? title : "مقطع فيديو";
+        if (cleanTitle.length() > 50) {
+            cleanTitle = cleanTitle.substring(0, 50) + "...";
+        }
         capturedList.add(0, new CapturedMedia(url, cleanTitle));
         runOnUiThread(new Runnable() {
             @Override
@@ -550,12 +547,19 @@ public class BrowserActivity extends Activity {
     private void triggerManualSniff() {
         WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري فحص الفيديوهات في الصفحة...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري قنص الفيديو النشط...", Toast.LENGTH_SHORT).show();
+        
+        // لو الصفحة الحالية يوتيوب وفيديو شغال، نلتقط رابط الصفحة الحالي أو رابط الـ video
+        String curUrl = current.getUrl();
+        if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
+            addCapturedMedia(curUrl, current.getTitle());
+        }
+
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
                 "for(var i=0;i<vids.length;i++){" +
-                "var src=vids[i].currentSrc||vids[i].src;" +
-                "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
+                "  var src=vids[i].currentSrc||vids[i].src;" +
+                "  if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
                 "}" +
                 "})()";
         current.loadUrl(js);
@@ -563,7 +567,7 @@ public class BrowserActivity extends Activity {
 
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
-            Toast.makeText(this, "لا توجد فيديوهات مكتشفة حالياً، جرب تشغيل الفيديو أولاً", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "لا توجد فيديوهات مقنوصة، اضغط على 🎯 بجانب الرابط", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -573,7 +577,7 @@ public class BrowserActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle("الفيديوهات المكتشفة (" + capturedList.size() + ")")
+                .setTitle("الفيديوهات المقنوصة (" + capturedList.size() + ")")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
@@ -687,9 +691,8 @@ public class BrowserActivity extends Activity {
 
     private void showSideMenu() {
         String[] menuItems = {
-                "🔍 فحص وقنص الفيديوهات الآن (Manual Sniff)",
+                "🔄 تحديث الصفحة الحالية",
                 "➕ فتح علامة تبويب جديدة",
-                "🔄 تحديث الصفحة",
                 "🧹 مسح الكوكيز والبيانات المسجلة"
         };
         new AlertDialog.Builder(this)
@@ -698,13 +701,11 @@ public class BrowserActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         if (which == 0) {
-                            triggerManualSniff();
+                            WebView current = getCurrentWebView();
+                            if (current != null) current.reload();
                         } else if (which == 1) {
                             addNewTab("about:home");
                         } else if (which == 2) {
-                            WebView current = getCurrentWebView();
-                            if (current != null) current.reload();
-                        } else if (which == 3) {
                             CookieManager.getInstance().removeAllCookies(null);
                             CookieManager.getInstance().flush();
                             Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
