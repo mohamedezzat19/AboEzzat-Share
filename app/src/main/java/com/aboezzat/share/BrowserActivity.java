@@ -34,8 +34,10 @@ import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import okhttp3.Call;
@@ -276,29 +278,20 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                String js = "(function() {" +
-                        "   function scan() {" +
-                        "       var vids = document.getElementsByTagName('video');" +
-                        "       for (var i = 0; i < vids.length; i++) {" +
-                        "           if (!vids[i].hasAttribute('data-sniffed')) {" +
-                        "               vids[i].setAttribute('data-sniffed', 'true');" +
-                        "               vids[i].addEventListener('play', function(e) {" +
-                        "                   for (var j = 0; j < vids.length; j++) {" +
-                        "                       if (vids[j] !== e.target) { vids[j].pause(); }" +
-                        "                   }" +
-                        "                   var src = e.target.currentSrc || e.target.src;" +
-                        "                   var t = document.title;" +
-                        "                   if (src && src.indexOf('http') === 0) {" +
-                        "                       window.AboEzzatBridge.onVideoPlaying(src, t);" +
-                        "                   }" +
-                        "               });" +
-                        "           }" +
-                        "       }" +
-                        "   }" +
-                        "   scan();" +
-                        "   setInterval(scan, 1500);" +
-                        "})();";
-                view.evaluateJavascript(js, null);
+                String js = "javascript:(function(){" +
+                        "var vids=document.getElementsByTagName('video');" +
+                        "for(var i=0;i<vids.length;i++){" +
+                        "if(!vids[i].hasAttribute('data-sniffed')){" +
+                        "vids[i].setAttribute('data-sniffed','true');" +
+                        "vids[i].addEventListener('play',function(e){" +
+                        "for(var j=0;j<vids.length;j++){if(vids[j]!==e.target){vids[j].pause();}}" +
+                        "var src=e.target.currentSrc||e.target.src;" +
+                        "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
+                        "});" +
+                        "}" +
+                        "}" +
+                        "})()";
+                view.loadUrl(js);
             }
         });
 
@@ -362,7 +355,7 @@ public class BrowserActivity extends Activity {
         }
         etUrl.setText(target);
 
-        java.util.Map<String, String> extraHeaders = new java.util.HashMap<>();
+        Map<String, String> extraHeaders = new HashMap<>();
         extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
         extraHeaders.put("X-Forwarded-For", "156.210.12.1");
 
@@ -404,4 +397,16 @@ public class BrowserActivity extends Activity {
                 "<div class='grid'>" +
                 "<a href='https://www.tiktok.com' class='card'>تيك توك</a>" +
                 "<a href='https://www.facebook.com' class='card'>فيسبوك</a>" +
-                "<a href='https://www.instagram.com' class='card
+                "<a href='https://www.instagram.com' class='card'>إنستجرام</a>" +
+                "<a href='https://m.youtube.com' class='card'>يوتيوب</a>" +
+                "<a href='https://www.threads.net' class='card'>ثريد</a>" +
+                "<a href='https://x.com' class='card'>تويتر / X</a>" +
+                customCards.toString() +
+                "</div>" +
+                "<div class='add-btn' onclick='promptAddSite()'>➕ إضافة موقع جديد للرئيسية</div>" +
+                "<script>" +
+                "function promptAddSite() {" +
+                "  var n = prompt('اكتب اسم الموقع:');" +
+                "  if(n) {" +
+                "    var u = prompt('اكتب رابط الموقع:', 'https://');" +
+                "    if(u) { window.AboEzzatBridge.onNewCustomSite(n
