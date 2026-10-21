@@ -1,6 +1,7 @@
 package com.aboezzat.share;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Context;
@@ -24,8 +25,6 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AppCompatActivity;
-
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,7 +36,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
-public class BrowserActivity extends AppCompatActivity {
+public class BrowserActivity extends Activity {
 
     private WebView webView;
     private Button btnSniff;
