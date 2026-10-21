@@ -19,11 +19,14 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Grant Execute Permission for Gradlew
-      run: chmod +x gradlew
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: 8.4
+        cache-disabled: true
 
-    - name: Build APK (No Cache)
-      run: ./gradlew assembleDebug --no-build-cache --no-daemon
+    - name: Build APK with Gradle
+      run: gradle assembleDebug --no-daemon
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
