@@ -72,9 +72,8 @@ public class BrowserActivity extends Activity {
     private String tvIp = "";
 
     private final List<String> adDomains = Arrays.asList(
-            "doubleclick.net", "googleads.g.doubleclick.net", "pagead2.googlesyndication.com",
-            "adservice.google.com", "googletagmanager.com", "adcolony.com", "criteo.com",
-            "adnxs.com", "outbrain.com", "taboola.com", "scorecardresearch.com"
+            "doubleclick.net", "googleads", "pagead2", "adservice.google",
+            "googletagmanager", "adcolony", "criteo", "adnxs", "outbrain", "taboola"
     );
 
     @Override
@@ -181,7 +180,7 @@ public class BrowserActivity extends Activity {
         return btn;
     }
 
-    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
+    @SuppressLint("SetJavaScriptEnabled")
     private void addNewTab(String url) {
         WebView webView = new WebView(this);
         WebSettings settings = webView.getSettings();
@@ -203,20 +202,7 @@ public class BrowserActivity extends Activity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        webView.addJavascriptInterface(new Object() {
-            @JavascriptInterface
-            public void onVideoPlaying(String mediaUrl, String title) {
-                if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
-                    addCapturedMedia(mediaUrl, title);
-                }
-            }
-
-            @JavascriptInterface
-            public void onNewCustomSite(String name, String siteUrl) {
-                saveCustomSite(name, siteUrl);
-                runOnUiThread(() -> loadHomePage());
-            }
-        }, "AboEzzatBridge");
+        webView.addJavascriptInterface(new WebAppInterface(), "AboEzzatBridge");
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -277,21 +263,6 @@ public class BrowserActivity extends Activity {
                     etUrl.setText(loadedUrl.equals("about:home") ? "" : loadedUrl);
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
-
-                String js = "javascript:(function(){" +
-                        "var vids=document.getElementsByTagName('video');" +
-                        "for(var i=0;i<vids.length;i++){" +
-                        "if(!vids[i].hasAttribute('data-sniffed')){" +
-                        "vids[i].setAttribute('data-sniffed','true');" +
-                        "vids[i].addEventListener('play',function(e){" +
-                        "for(var j=0;j<vids.length;j++){if(vids[j]!==e.target){vids[j].pause();}}" +
-                        "var src=e.target.currentSrc||e.target.src;" +
-                        "if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
-                        "});" +
-                        "}" +
-                        "}" +
-                        "})()";
-                view.loadUrl(js);
             }
         });
 
@@ -304,6 +275,21 @@ public class BrowserActivity extends Activity {
             loadHomePage();
         } else {
             loadTargetUrl(url);
+        }
+    }
+
+    public class WebAppInterface {
+        @JavascriptInterface
+        public void onVideoPlaying(String mediaUrl, String title) {
+            if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
+                addCapturedMedia(mediaUrl, title);
+            }
+        }
+
+        @JavascriptInterface
+        public void onNewCustomSite(String name, String siteUrl) {
+            saveCustomSite(name, siteUrl);
+            runOnUiThread(() -> loadHomePage());
         }
     }
 
@@ -409,4 +395,77 @@ public class BrowserActivity extends Activity {
                 "  var n = prompt('اكتب اسم الموقع:');" +
                 "  if(n) {" +
                 "    var u = prompt('اكتب رابط الموقع:', 'https://');" +
-                "    if(u) { window.AboEzzatBridge.onNewCustomSite(n
+                "    if(u) { window.AboEzzatBridge.onNewCustomSite(n, u); }" +
+                "  }" +
+                "}" +
+                "</script></body></html>";
+
+        current.loadDataWithBaseURL("https://www.google.com.eg", homeHtml, "text/html", "UTF-8", null);
+    }
+
+    private void saveCustomSite(String name, String url) {
+        SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
+        Set<String> set = new HashSet<>(prefs.getStringSet("custom_sites", new HashSet<>()));
+        set.add(name + "|" + url);
+        prefs.edit().putStringSet("custom_sites", set).apply();
+    }
+
+    private void showMediaListDialog() {
+        if (capturedList.isEmpty()) {
+            Toast.makeText(this, "لا توجد فيديوهات مكتشفة في هذه الصفحة", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] items = new String[capturedList.size()];
+        for (int i = 0; i < capturedList.size(); i++) {
+            items[i] = (i + 1) + ". " + capturedList.get(i).title;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("اختر الفيديو (" + capturedList.size() + ")")
+                .setItems(items, (dialog, which) -> showMediaOptionsDialog(capturedList.get(which)))
+                .setPositiveButton("مسح القائمة", (dialog, which) -> {
+                    capturedList.clear();
+                    btnCast.setText("📺 0");
+                    btnCast.setTextColor(Color.LTGRAY);
+                    btnCast.setBackgroundColor(Color.parseColor("#333333"));
+                })
+                .show();
+    }
+
+    private void showMediaOptionsDialog(CapturedMedia media) {
+        String[] options = {
+                "📺 بث للشاشة الآن (Cast to TV)",
+                "🎬 تحميل الفيديو بأعلى جودة (Full HD MP4)",
+                "🎵 تحميل الصوت فقط (Audio MP3)"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle(media.title)
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        castToTv(media.url);
+                    } else if (which == 1) {
+                        downloadMedia(media.url, false);
+                    } else if (which == 2) {
+                        downloadMedia(media.url, true);
+                    }
+                })
+                .show();
+    }
+
+    private void castToTv(String mediaUrl) {
+        if (tvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين IP الشاشة من القائمة الرئيسية أولاً", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+                endpoint = "http://" + endpoint;
+            }
+            if (!endpoint.contains(":8080")) {
+                endpoint = endpoint + ":8080";
+            }
+
+            String
