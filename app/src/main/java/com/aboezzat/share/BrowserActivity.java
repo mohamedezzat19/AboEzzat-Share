@@ -249,9 +249,10 @@ public class BrowserActivity extends Activity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
 
-        // واجهة كروم أندرويد قياسية حديثة
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
-        settings.setGeolocationEnabled(false);
+        
+        // تفعيل الموقع الجغرافي لدعم إحداثيات المنصورة الوهمية
+        settings.setGeolocationEnabled(true);
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
@@ -262,10 +263,10 @@ public class BrowserActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
-                callback.invoke(origin, false, false);
+                // قبول الإذن لتمكين حقن إحداثيات المنصورة
+                callback.invoke(origin, true, false);
             }
 
-            // تفعيل الشاشة الكاملة لليوتيوب وتدوير الشاشة تلقائياً
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
                 if (customView != null) {
@@ -312,8 +313,6 @@ public class BrowserActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
-
-                // منع اللوب وإيقاف التحويل للتطبيقات بصمت تام دون إعادة تحميل
                 if (targetUrl.startsWith("intent://") || targetUrl.startsWith("snssdk") || !targetUrl.startsWith("http")) {
                     return true;
                 }
@@ -324,14 +323,12 @@ public class BrowserActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString().toLowerCase();
 
-                // فلترة الإعلانات
                 for (String ad : adDomains) {
                     if (reqUrl.contains(ad)) {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
 
-                // قنص البث المباشر
                 if ((reqUrl.contains("pull-flv") || reqUrl.contains("pull-hls") || reqUrl.contains(".m3u8")) &&
                         !reqUrl.contains(".ts") && !reqUrl.contains("seg-") && !reqUrl.contains("bytestart")) {
                     addCapturedMedia(request.getUrl().toString(), view.getTitle());
@@ -348,15 +345,19 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // كود متقدم: إزالة إعلانات يوتيوب تلقائياً + قنص الفيديو المباشر الحقيقي
+                // حقن إحداثيات المنصورة، الدقهلية، مصر وتخطي إعلانات يوتيوب وقنص الفيديو
                 String js = "javascript:(function(){" +
+                        "try{" +
+                        "navigator.geolocation.getCurrentPosition = function(success) {" +
+                        "  var pos = { coords: { latitude: 31.0409, longitude: 31.3785, accuracy: 20 } };" +
+                        "  success(pos);" +
+                        "};" +
+                        "}catch(e){}" +
                         "function blockAndSniff(){" +
-                        // تخطي إعلانات يوتيوب فوراً
                         "var ad=document.querySelector('.ad-showing, .ad-interrupting');" +
                         "if(ad){var v=document.querySelector('video');if(v){v.currentTime=v.duration||100;}}" +
                         "var skipBtn=document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
                         "if(skipBtn){skipBtn.click();}" +
-                        // قنص مشغلات الفيديو النشطة
                         "var vids=document.getElementsByTagName('video');" +
                         "for(var i=0;i<vids.length;i++){" +
                         "if(!vids[i].hasAttribute('data-sniffed')){" +
@@ -456,9 +457,9 @@ public class BrowserActivity extends Activity {
 
         if (!target.startsWith("http://") && !target.startsWith("https://")) {
             try {
-                target = "https://www.google.com.eg/search?q=" + URLEncoder.encode(target, "UTF-8");
+                target = "https://www.google.com.eg/search?q=" + URLEncoder.encode(target, "UTF-8") + "&gl=eg&hl=ar";
             } catch (Exception e) {
-                target = "https://www.google.com.eg/search?q=" + target;
+                target = "https://www.google.com.eg/search?q=" + target + "&gl=eg&hl=ar";
             }
         }
         etUrl.setText(target);
@@ -502,6 +503,8 @@ public class BrowserActivity extends Activity {
                 "</style></head><body>" +
                 "<h3 style='color:#00B0FF;margin-top:15px;'>Abo Ezzat Browser</h3>" +
                 "<form action='https://www.google.com.eg/search' method='get'>" +
+                "<input type='hidden' name='gl' value='eg'>" +
+                "<input type='hidden' name='hl' value='ar'>" +
                 "<input type='text' name='q' class='search-box' placeholder='ابحث في جوجل مصر...'>" +
                 "</form>" +
                 "<div class='grid'>" +
@@ -744,8 +747,6 @@ public class BrowserActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (customView != null) {
-            // إغلاق الشاشة الكاملة والعودة للوضع العادي
-            WebChromeClient client = getCurrentWebView() != null ? new WebChromeClient() : null;
             if (customViewCallback != null) {
                 customViewCallback.onCustomViewHidden();
             }
