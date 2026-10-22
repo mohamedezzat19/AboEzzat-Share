@@ -226,7 +226,6 @@ public class BrowserActivity extends Activity {
 
         setContentView(rootLayout);
 
-        // فحص إذا كان التطبيق تم فتحه عبر زر المشاركة من تطبيق آخر
         String incomingUrl = extractSharedUrl(getIntent());
         if (incomingUrl != null && !incomingUrl.isEmpty()) {
             addNewTab(incomingUrl);
@@ -248,7 +247,7 @@ public class BrowserActivity extends Activity {
     private String extractSharedUrl(Intent intent) {
         if (intent == null) return null;
         String action = intent.getAction();
-        if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(intent.getType())) {
+        if (Intent.ACTION_SEND.equals(action) && intent.getType() != null) {
             String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
             if (sharedText != null) {
                 Pattern pattern = Pattern.compile("https?://\\S+");
@@ -395,28 +394,6 @@ public class BrowserActivity extends Activity {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
-
-                boolean isChunkOrAd = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") || 
-                                      lowerUrl.contains("bytestart") || lowerUrl.contains("adformat") || 
-                                      lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
-                                      lowerUrl.contains("preview");
-
-                if (!isChunkOrAd) {
-                    // شروط موسعة تشمل مواقع الفيديو والمشغلات المختلفة
-                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
-                        lowerUrl.contains("pull-flv") || lowerUrl.contains("mime=video") || lowerUrl.contains("format=mp4")) {
-                        String inferredTitle = "فيديو مباشر";
-                        try {
-                            Uri uri = Uri.parse(reqUrl);
-                            String lastSeg = uri.getLastPathSegment();
-                            if (lastSeg != null && lastSeg.length() > 3) {
-                                inferredTitle = lastSeg.replace(".mp4", "").replace(".m3u8", "");
-                            }
-                        } catch (Exception ignored) {}
-                        addCapturedMedia(reqUrl, inferredTitle);
-                    }
-                }
-
                 return super.shouldInterceptRequest(view, request);
             }
 
@@ -428,10 +405,7 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                if (loadedUrl.contains("youtube.com/watch") || loadedUrl.contains("youtu.be")) {
-                    addCapturedMedia(loadedUrl, view.getTitle() != null ? view.getTitle() : "فيديو يوتيوب");
-                }
-
+                // سكريبت تخطي إعلانات يوتيوب فقط
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
@@ -445,7 +419,7 @@ public class BrowserActivity extends Activity {
                         "  var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
                         "  if(skipBtn){ skipBtn.click(); }" +
                         "}" +
-                        "setInterval(fastSkipYtAds, 250);" +
+                        "setInterval(fastSkipYtAds, 300);" +
                         "})()";
                 view.loadUrl(js);
             }
@@ -498,6 +472,7 @@ public class BrowserActivity extends Activity {
                 btnCast.setText("📺 " + capturedList.size());
                 btnCast.setTextColor(Color.BLACK);
                 btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
+                Toast.makeText(BrowserActivity.this, "تم قنص الفيديو بنجاح ✓", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -620,36 +595,39 @@ public class BrowserActivity extends Activity {
         Toast.makeText(this, "جاري فحص الفيديو المعروض...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
-        if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
+        if (curUrl != null && (curUrl.contains("watch") || curUrl.contains("youtu.be"))) {
             addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب");
             return;
         }
 
-        // سكريبت ذكي لفحص الفيديو المعروض أمام العين حالياً (خاص بالريلز وإنستجرام ومواقع الأفلام)
+        // فحص الفيديو النشط في منتصف الشاشة فقط واستخراج عنوانه
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
                 "var targetVideo=null;" +
-                "var maxVisibleArea=0;" +
+                "var maxArea=0;" +
                 "var winH=window.innerHeight;" +
                 "for(var i=0;i<vids.length;i++){" +
-                "  var rect=vids[i].getBoundingClientRect();" +
-                "  var visibleH=Math.max(0, Math.min(rect.bottom, winH) - Math.max(rect.top, 0));" +
-                "  if(visibleH > maxVisibleArea){" +
-                "    maxVisibleArea = visibleH;" +
+                "  var r=vids[i].getBoundingClientRect();" +
+                "  var visibleH=Math.max(0, Math.min(r.bottom, winH) - Math.max(r.top, 0));" +
+                "  if(visibleH > maxArea){" +
+                "    maxArea = visibleH;" +
                 "    targetVideo = vids[i];" +
                 "  }" +
                 "}" +
                 "if(targetVideo){" +
                 "  var src=targetVideo.currentSrc||targetVideo.src;" +
                 "  if(!src || src.indexOf('blob:')===0){" +
-                "    var sources=targetVideo.getElementsByTagName('source');" +
-                "    if(sources.length>0){ src=sources[0].src; }" +
+                "    var s=targetVideo.getElementsByTagName('source');" +
+                "    if(s.length>0){ src=s[0].src; }" +
                 "  }" +
                 "  if(src && src.indexOf('http')===0){" +
                 "    var title=document.title||'مقطع فيديو';" +
                 "    var parent=targetVideo.closest('article, [role=\"article\"], div');" +
                 "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
-                "      title = parent.innerText.trim().split('\\n')[0];" +
+                "      var lines=parent.innerText.trim().split('\\n');" +
+                "      for(var k=0;k<lines.length;k++){" +
+                "        if(lines[k].trim().length > 3){ title=lines[k].trim(); break; }" +
+                "      }" +
                 "    }" +
                 "    window.AboEzzatBridge.onVideoPlaying(src, title);" +
                 "  }" +
@@ -704,13 +682,32 @@ public class BrowserActivity extends Activity {
                         if (which == 0) {
                             castToTv(media.url);
                         } else if (which == 1) {
-                            downloadMedia(media.url, false);
+                            handleDownloadRequest(media.url, false);
                         } else if (which == 2) {
-                            downloadMedia(media.url, true);
+                            handleDownloadRequest(media.url, true);
                         }
                     }
                 })
                 .show();
+    }
+
+    private void handleDownloadRequest(String mediaUrl, boolean audioOnly) {
+        // تنبيه خاص بروابط يوتيوب لمنع تنزيل ملفات تالفة
+        if (mediaUrl.contains("youtube.com") || mediaUrl.contains("youtu.be")) {
+            new AlertDialog.Builder(this)
+                    .setTitle("تنبيه بخصوص يوتيوب")
+                    .setMessage("روابط يوتيوب مشفرة ومصممة للبث للشاشة مباشرة عبر SmartTube. لتنزيل الفيديو يمكنك استخدام البث، أو نسخه لتطبيق تنزيل متخصص.")
+                    .setPositiveButton("بث للشاشة الآن", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            castToTv(mediaUrl);
+                        }
+                    })
+                    .setNegativeButton("إلغاء", null)
+                    .show();
+            return;
+        }
+        downloadMedia(mediaUrl, audioOnly);
     }
 
     private void castToTv(String mediaUrl) {
@@ -785,6 +782,7 @@ public class BrowserActivity extends Activity {
     private void showSideMenu() {
         String[] menuItems = {
                 "🔄 تحديث الصفحة الحالية",
+                "📂 مجلد التنزيلات (Downloads)",
                 "➕ فتح علامة تبويب جديدة",
                 "🧹 مسح الكوكيز والبيانات المسجلة"
         };
@@ -797,8 +795,10 @@ public class BrowserActivity extends Activity {
                             WebView current = getCurrentWebView();
                             if (current != null) current.reload();
                         } else if (which == 1) {
-                            addNewTab("about:home");
+                            openDownloadsFolder();
                         } else if (which == 2) {
+                            addNewTab("about:home");
+                        } else if (which == 3) {
                             CookieManager.getInstance().removeAllCookies(null);
                             CookieManager.getInstance().flush();
                             Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
@@ -806,6 +806,22 @@ public class BrowserActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    private void openDownloadsFolder() {
+        try {
+            Intent intent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                Uri uri = Uri.parse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getPath());
+                intent.setDataAndType(uri, "*/*");
+                startActivity(Intent.createChooser(intent, "فتح التنزيلات"));
+            } catch (Exception ex) {
+                Toast.makeText(this, "تعذر فتح مجلد التنزيلات تلقائياً", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void showTabsDialog() {
