@@ -19,8 +19,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,7 +49,6 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         startLocalServer();
 
-        // فحص إذا كان التطبيق تم فتحه عبر زر المشاركة
         if (handleIncomingShareIntent(getIntent())) {
             return;
         }
@@ -83,24 +84,21 @@ public class MainActivity extends Activity {
     private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
 
-        // 1. روابط البث المباشر للشاشة "خبط لزق" (يوتيوب، تيك توك العادي، تويتر/X، ثريدز)
-        boolean isDirectCast = (lowerUrl.contains("youtube.com") || lowerUrl.contains("youtu.be") ||
-                                lowerUrl.contains("tiktok.com") || lowerUrl.contains("twitter.com") || 
-                                lowerUrl.contains("x.com") || lowerUrl.contains("threads.net"))
-                                && !lowerUrl.contains("/live");
+        boolean isComplexSite = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
+                                lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com") || 
+                                lowerUrl.contains("/live");
 
-        if (isDirectCast) {
-            castUrlDirectlyToTv(url);
-        } else {
-            // 2. الروابط التي تحتاج إلى فحص وتخطي حماية (فيسبوك، إنستجرام، لايف تيك توك، ومواقع الأفلام)
+        if (isComplexSite) {
             openInBrowser(url);
+        } else {
+            castUrlDirectlyToTv(url);
         }
     }
 
     private void castUrlDirectlyToTv(String mediaUrl) {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً في التطبيق", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "يرجى إدخال عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
             buildMainUi();
             return;
         }
@@ -118,11 +116,11 @@ public class MainActivity extends Activity {
             Request req = new Request.Builder().url(fullUrl).build();
             client.newCall(req).enqueue(new Callback() {
                 @Override
-                public void onFailure(Call call, java.io.IOException e) {
+                public void onFailure(Call call, IOException e) {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد من تشغيل الشاشة والـ IP", Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة، تأكد من الاتصال", Toast.LENGTH_LONG).show();
                             finish();
                         }
                     });
@@ -133,7 +131,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل على الشاشة فوراً ✓", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل فوراً ✓", Toast.LENGTH_SHORT).show();
                             finish();
                         }
                     });
@@ -271,7 +269,7 @@ public class MainActivity extends Activity {
     private void castLocalMediaToTv() {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "يرجى إدخال IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -282,8 +280,12 @@ public class MainActivity extends Activity {
         }
 
         String mime = getContentResolver().getType(selectedMediaUri);
-        String targetPath = (mime != null && mime.startsWith("image/")) ? "/view_image" : "/media";
-        String localStreamUrl = "http://" + phoneIp + ":8088" + targetPath;
+        String targetUrl;
+        if (mime != null && mime.startsWith("image/")) {
+            targetUrl = "http://" + phoneIp + ":8088/view_image";
+        } else {
+            targetUrl = "http://" + phoneIp + ":8088/media";
+        }
 
         try {
             String endpoint = tvIp;
@@ -294,15 +296,15 @@ public class MainActivity extends Activity {
                 endpoint = endpoint + ":8080";
             }
 
-            String fullUrl = endpoint + "/?url=" + URLEncoder.encode(localStreamUrl, "UTF-8");
+            String fullUrl = endpoint + "/?url=" + URLEncoder.encode(targetUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
             client.newCall(req).enqueue(new Callback() {
                 @Override
-                public void onFailure(Call call, java.io.IOException e) {
+                public void onFailure(Call call, IOException e) {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد أن الشاشة والهاتف على نفس الشبكة", Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_LONG).show();
                         }
                     });
                 }
@@ -345,17 +347,40 @@ public class MainActivity extends Activity {
                     try {
                         AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(selectedMediaUri, "r");
                         if (afd != null) {
-                            FileInputStream fis = afd.createInputStream();
                             long fileLength = afd.getLength();
                             String mime = getContentResolver().getType(selectedMediaUri);
                             if (mime == null) {
                                 mime = "video/mp4";
                             }
 
-                            Response res = newFixedLengthResponse(Response.Status.OK, mime, fis, fileLength);
-                            res.addHeader("Accept-Ranges", "bytes");
-                            res.addHeader("Access-Control-Allow-Origin", "*");
-                            return res;
+                            Map<String, String> headers = session.getHeaders();
+                            String range = headers.get("range");
+
+                            if (range != null && range.startsWith("bytes=")) {
+                                String[] parts = range.substring("bytes=".length()).split("-");
+                                long start = Long.parseLong(parts[0]);
+                                long end = (parts.length > 1 && !parts[1].isEmpty()) ? Long.parseLong(parts[1]) : fileLength - 1;
+
+                                if (end >= fileLength) end = fileLength - 1;
+                                long contentLength = end - start + 1;
+
+                                FileInputStream fis = afd.createInputStream();
+                                fis.skip(start);
+
+                                Response res = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, fis, contentLength);
+                                res.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+                                res.addHeader("Content-Length", String.valueOf(contentLength));
+                                res.addHeader("Accept-Ranges", "bytes");
+                                res.addHeader("Access-Control-Allow-Origin", "*");
+                                return res;
+                            } else {
+                                FileInputStream fis = afd.createInputStream();
+                                Response res = newFixedLengthResponse(Response.Status.OK, mime, fis, fileLength);
+                                res.addHeader("Content-Length", String.valueOf(fileLength));
+                                res.addHeader("Accept-Ranges", "bytes");
+                                res.addHeader("Access-Control-Allow-Origin", "*");
+                                return res;
+                            }
                         }
                     } catch (Exception e) {
                         return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error loading file");
