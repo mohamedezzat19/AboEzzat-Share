@@ -22,6 +22,7 @@ import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -240,8 +241,7 @@ public class BrowserActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled")
     private void addNewTab(String url) {
         final WebView webView = new WebView(this);
-        
-        // إصلاح لوحة المفاتيح والفوكس للمواقع
+
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
         webView.requestFocus(View.FOCUS_DOWN);
@@ -285,6 +285,17 @@ public class BrowserActivity extends Activity {
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 callback.invoke(origin, true, false);
+            }
+
+            // تفعيل الميكروفون للبحث الصوتي
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        request.grant(request.getResources());
+                    }
+                });
             }
 
             @Override
@@ -350,12 +361,16 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                // إصلاح الـ Crash: عدم استدعاء view.getTitle() من خيط الشبكة
-                if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv") || 
-                    lowerUrl.contains("videoplayback") || lowerUrl.contains("tiktokcdn.com") || lowerUrl.contains("fbcdn.net")) {
-                    
-                    if (!lowerUrl.contains(".ts") && !lowerUrl.contains("seg-") && !lowerUrl.contains("bytestart") && !lowerUrl.contains("adformat")) {
-                        addCapturedMedia(reqUrl, "مقطع فيديو نشط");
+                // فلترة دقيقة: استبعاد التقطيع والملفات المؤقتة والإعلانات
+                boolean isChunkOrAd = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") || 
+                                      lowerUrl.contains("bytestart") || lowerUrl.contains("adformat") || 
+                                      lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
+                                      lowerUrl.contains("preview");
+
+                if (!isChunkOrAd) {
+                    // قنص روابط البث الكاملة والمباشرة
+                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv")) {
+                        addCapturedMedia(reqUrl, "مقطع فيديو كامل");
                     }
                 }
 
@@ -363,14 +378,18 @@ public class BrowserActivity extends Activity {
             }
 
             @Override
-            public void onPageFinished(WebView view, String loadedUrl) {
+            public void onPageFinished(final WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
                 if (getCurrentWebView() == view) {
                     etUrl.setText(loadedUrl.equals("about:home") ? "" : loadedUrl);
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // كود خفيف لا يعطل لوحة المفاتيح
+                // قنص فوري لروابط يوتيوب الرسمية لتشغيلها على SmartTube مباشرة
+                if (loadedUrl.contains("youtube.com/watch") || loadedUrl.contains("youtu.be")) {
+                    addCapturedMedia(loadedUrl, view.getTitle() != null ? view.getTitle() : "فيديو يوتيوب");
+                }
+
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
@@ -546,20 +565,23 @@ public class BrowserActivity extends Activity {
     }
 
     private void triggerManualSniff() {
-        WebView current = getCurrentWebView();
+        final WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري قنص الفيديو النشط...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري فحص الفيديو الصافي...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
-            addCapturedMedia(curUrl, current.getTitle());
+            addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب");
+            return;
         }
 
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
                 "for(var i=0;i<vids.length;i++){" +
                 "  var src=vids[i].currentSrc||vids[i].src;" +
-                "  if(src&&src.indexOf('http')===0){window.AboEzzatBridge.onVideoPlaying(src,document.title);}" +
+                "  if(src&&src.indexOf('http')===0&&src.indexOf('blob:')!==0){" +
+                "    window.AboEzzatBridge.onVideoPlaying(src,document.title);" +
+                "  }" +
                 "}" +
                 "})()";
         current.loadUrl(js);
@@ -567,7 +589,7 @@ public class BrowserActivity extends Activity {
 
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
-            Toast.makeText(this, "لا توجد فيديوهات مقنوصة، اضغط على 🎯 بجانب الرابط", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "لا توجد فيديوهات، شغل الفيديو واضغط 🎯", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -577,7 +599,7 @@ public class BrowserActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle("الفيديوهات المقنوصة (" + capturedList.size() + ")")
+                .setTitle("الفيديوهات المكتشفة (" + capturedList.size() + ")")
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
