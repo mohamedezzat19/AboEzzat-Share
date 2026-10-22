@@ -13,6 +13,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -76,6 +77,8 @@ public class BrowserActivity extends Activity {
     private Button btnCast;
     private Button btnTabs;
 
+    private PowerManager.WakeLock wakeLock;
+
     private static class CapturedMedia {
         String url;
         String title;
@@ -98,6 +101,13 @@ public class BrowserActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AboEzzatShare:AudioPlaybackWakeLock");
+            }
+        } catch (Exception ignored) {}
 
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         tvIp = prefs.getString("tv_ip", "").trim();
@@ -405,10 +415,15 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت تخطي إعلانات يوتيوب فقط
+                // سكريبت تخطي إعلانات يوتيوب + منع إيقاف الصوت عند قفل الشاشة (حجب visibilitychange)
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
+                        "}catch(e){}" +
+                        "try{" +
+                        "Object.defineProperty(document, 'hidden', { get: function(){ return false; }, configurable: true });" +
+                        "Object.defineProperty(document, 'visibilityState', { get: function(){ return 'visible'; }, configurable: true });" +
+                        "document.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true);" +
                         "}catch(e){}" +
                         "function fastSkipYtAds(){" +
                         "  var ad = document.querySelector('.ad-showing, .ad-interrupting');" +
@@ -600,7 +615,6 @@ public class BrowserActivity extends Activity {
             return;
         }
 
-        // فحص الفيديو النشط في منتصف الشاشة فقط واستخراج عنوانه
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
                 "var targetVideo=null;" +
@@ -692,7 +706,6 @@ public class BrowserActivity extends Activity {
     }
 
     private void handleDownloadRequest(String mediaUrl, boolean audioOnly) {
-        // تنبيه خاص بروابط يوتيوب لمنع تنزيل ملفات تالفة
         if (mediaUrl.contains("youtube.com") || mediaUrl.contains("youtu.be")) {
             new AlertDialog.Builder(this)
                     .setTitle("تنبيه بخصوص يوتيوب")
@@ -862,6 +875,37 @@ public class BrowserActivity extends Activity {
         webContainer.removeView(toRemove);
         toRemove.destroy();
         switchToTab(Math.max(0, currentTabIndex - 1));
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // إبقاء مشغل الميديا مستمراً في الخلفية وعند قفل الشاشة دون إيقافه
+        if (wakeLock != null && !wakeLock.isHeld()) {
+            try {
+                wakeLock.acquire(60 * 60 * 1000L); // ساعة تشغيل مستمر في الخلفية
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try {
+                wakeLock.release();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try {
+                wakeLock.release();
+            } catch (Exception ignored) {}
+        }
     }
 
     @Override
