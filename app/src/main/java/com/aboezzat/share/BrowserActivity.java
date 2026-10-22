@@ -27,6 +27,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
@@ -183,15 +185,17 @@ public class BrowserActivity extends Activity {
                 triggerManualSniff();
             }
         });
-        LinearLayout.LayoutParams sniffParams = new LinearLayout.LayoutParams(100, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams sniffParams = new LinearLayout.LayoutParams(95, ViewGroup.LayoutParams.WRAP_CONTENT);
         sniffParams.setMargins(0, 0, 5, 0);
         topBar.addView(btnSniff, sniffParams);
 
+        // زر البث الأصفر التفاعلي - مخفي في البداية تماماً مثل Web Video Caster
         btnCast = new Button(this);
         btnCast.setText("📺 0");
         btnCast.setTextSize(13);
-        btnCast.setTextColor(Color.LTGRAY);
-        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+        btnCast.setTextColor(Color.BLACK);
+        btnCast.setBackgroundColor(Color.parseColor("#FFC107"));
+        btnCast.setVisibility(View.GONE);
         btnCast.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -416,14 +420,14 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                // فلترة مقاطع الإنستجرام التافهة (Ranges والقطع الصغيرة)
+                // فلترة الأجزاء التافهة المزعجة
                 boolean isJunkChunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
                                       lowerUrl.contains("bytestart=") || lowerUrl.contains("adformat") ||
                                       lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
                                       lowerUrl.contains("preview");
 
                 if (!isJunkChunk) {
-                    // التقاط FLV (تيك توك لايف) و M3U8 (تويتر وبثوث) و MP4 (ثريدز وفيسبوك)
+                    // التقاط FLV (تيك توك لايف) و M3U8 (تويتر وبثوث الأفلام) و MP4
                     if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-") || 
                         lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
                         lowerUrl.contains("mime=video")) {
@@ -432,16 +436,21 @@ public class BrowserActivity extends Activity {
                         if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "-flv";
                         else if (lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u")) format = "-m3u8";
 
-                        String inferredTitle = "فيديو مباشر";
+                        String cleanName = "فيديو مباشر";
                         try {
-                            Uri uri = Uri.parse(reqUrl);
-                            String lastSeg = uri.getLastPathSegment();
-                            if (lastSeg != null && lastSeg.length() > 3) {
-                                inferredTitle = lastSeg.replace(".mp4", "").replace(".m3u8", "").replace(".flv", "");
+                            String pageTitle = view.getTitle();
+                            if (pageTitle != null && !pageTitle.isEmpty() && !pageTitle.contains("http")) {
+                                cleanName = pageTitle;
+                            } else {
+                                Uri uri = Uri.parse(reqUrl);
+                                String lastSeg = uri.getLastPathSegment();
+                                if (lastSeg != null && lastSeg.length() > 3) {
+                                    cleanName = lastSeg.replace(".mp4", "").replace(".m3u8", "").replace(".flv", "");
+                                }
                             }
                         } catch (Exception ignored) {}
 
-                        addCapturedMedia(reqUrl, inferredTitle, format, null);
+                        addCapturedMedia(reqUrl, cleanName, format, null);
                     }
                 }
 
@@ -456,7 +465,7 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت صائد الميديا ومراقب الفيديو النشط لسحب البوستر
+                // سكريبت صائد الميديا النشط وسحب البوستر وعنوان الميتا
                 String js = "javascript:(function(){" +
                         "try{" +
                         "  var egyptPos = { coords: { latitude: 30.0444, longitude: 31.2357, accuracy: 15, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() };" +
@@ -476,7 +485,12 @@ public class BrowserActivity extends Activity {
                         "  HTMLMediaElement.prototype.play = function(){" +
                         "    var src = this.currentSrc || this.src;" +
                         "    var poster = this.poster || '';" +
-                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlayingWithPoster(src, document.title || 'فيديو مباشر', poster); }" +
+                        "    if(!poster){" +
+                        "      var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                        "      if(metaImg){ poster = metaImg.content; }" +
+                        "    }" +
+                        "    var t = document.title || 'فيديو مباشر';" +
+                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlayingWithPoster(src, t, poster); }" +
                         "    return origPlay.apply(this, arguments);" +
                         "  };" +
                         "}catch(e){}" +
@@ -531,8 +545,9 @@ public class BrowserActivity extends Activity {
     }
 
     private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl) {
+        // فلترة التكرار للروابط المتشابهة و manifest
         for (CapturedMedia item : capturedList) {
-            if (item.url.equalsIgnoreCase(url)) {
+            if (item.url.equalsIgnoreCase(url) || (item.url.contains("manifest") && url.contains("manifest"))) {
                 if (item.posterUrl == null && posterUrl != null) {
                     item.posterUrl = posterUrl;
                     loadThumbnailAsync(item);
@@ -540,9 +555,10 @@ public class BrowserActivity extends Activity {
                 return;
             }
         }
+
         String cleanTitle = (title != null && !title.isEmpty()) ? title : "مقطع فيديو";
-        if (cleanTitle.length() > 50) {
-            cleanTitle = cleanTitle.substring(0, 50) + "...";
+        if (cleanTitle.length() > 55) {
+            cleanTitle = cleanTitle.substring(0, 55) + "...";
         }
         final CapturedMedia newMedia = new CapturedMedia(url, cleanTitle, format, posterUrl);
         capturedList.add(0, newMedia);
@@ -554,11 +570,15 @@ public class BrowserActivity extends Activity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                // إضاءة زر الـ Cast بالأصفر المميز كما في الويب كاستر
+                // إظهار زر الـ Cast وتشغيل الوميض الأصفر (Pulse Animation) كما في الويب كاستر
+                btnCast.setVisibility(View.VISIBLE);
                 btnCast.setText("📺 " + capturedList.size());
-                btnCast.setTextColor(Color.BLACK);
-                btnCast.setBackgroundColor(Color.parseColor("#FFD700"));
-                Toast.makeText(BrowserActivity.this, "تم قنص فيديو جديد ✓", Toast.LENGTH_SHORT).show();
+
+                Animation blink = new AlphaAnimation(0.3f, 1.0f);
+                blink.setDuration(350);
+                blink.setRepeatMode(Animation.REVERSE);
+                blink.setRepeatCount(4);
+                btnCast.startAnimation(blink);
             }
         });
     }
@@ -606,8 +626,7 @@ public class BrowserActivity extends Activity {
 
         capturedList.clear();
         btnCast.setText("📺 0");
-        btnCast.setTextColor(Color.LTGRAY);
-        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+        btnCast.setVisibility(View.GONE); // إعادة إخفاء الزر عند فتح صفحة جديدة
 
         if (!target.startsWith("http://") && !target.startsWith("https://")) {
             try {
@@ -633,8 +652,7 @@ public class BrowserActivity extends Activity {
 
         capturedList.clear();
         btnCast.setText("📺 0");
-        btnCast.setTextColor(Color.LTGRAY);
-        btnCast.setBackgroundColor(Color.parseColor("#333333"));
+        btnCast.setVisibility(View.GONE);
         etUrl.setText("");
 
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
@@ -709,19 +727,16 @@ public class BrowserActivity extends Activity {
                 "for(var i=0; i<vids.length; i++){" +
                 "  var src = vids[i].currentSrc || vids[i].src;" +
                 "  var poster = vids[i].poster || '';" +
+                "  if(!poster){" +
+                "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                "    if(metaImg){ poster = metaImg.content; }" +
+                "  }" +
                 "  if(!src || src.indexOf('blob:') === 0){" +
                 "    var s = vids[i].getElementsByTagName('source');" +
                 "    if(s.length > 0){ src = s[0].src; }" +
                 "  }" +
                 "  if(src && src.indexOf('http') === 0){" +
                 "    var title = document.title || 'مقطع فيديو';" +
-                "    var parent = vids[i].closest('article, [role=\"article\"], div');" +
-                "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
-                "      var lines = parent.innerText.trim().split('\\n');" +
-                "      for(var k=0; k<lines.length; k++){" +
-                "        if(lines[k].trim().length > 3){ title = lines[k].trim(); break; }" +
-                "      }" +
-                "    }" +
                 "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, title, poster);" +
                 "  }" +
                 "}" +
@@ -729,7 +744,7 @@ public class BrowserActivity extends Activity {
         current.loadUrl(js);
     }
 
-    // تصميم قائمة الفيديوهات الاحترافي المشابه للويب كاستر تماماً
+    // تصميم قائمة الفيديوهات بالترتيب العربي المطابق لـ Web Video Caster بالمللي
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
             Toast.makeText(this, "لا توجد فيديوهات مكتشفة، شغل الفيديو أولاً ثم اضغط 🎯", Toast.LENGTH_SHORT).show();
@@ -751,9 +766,10 @@ public class BrowserActivity extends Activity {
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(Color.parseColor("#181818"));
         main.setPadding(25, 25, 25, 25);
+        main.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); // اتجاه عربي أصيل
 
         TextView header = new TextView(this);
-        header.setText("قائمة الفيديوهات المكتشفة (" + capturedList.size() + ")");
+        header.setText("قائمة الفيديوهات (" + capturedList.size() + ")");
         header.setTextColor(Color.WHITE);
         header.setTextSize(18);
         header.setGravity(Gravity.CENTER);
@@ -783,22 +799,23 @@ public class BrowserActivity extends Activity {
                 row.setPadding(15, 20, 15, 20);
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setBackgroundColor(Color.parseColor("#1F1F1F"));
+                row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
-                // الأيقونة أو الصورة المصغرة (Thumbnail)
+                // 1. على اليمين: الصورة المصغرة أو المربع البرتقالي المميز
                 ImageView thumb = new ImageView(BrowserActivity.this);
                 LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
-                thumbParams.setMargins(0, 0, 15, 0);
+                thumbParams.setMargins(0, 0, 18, 0);
                 thumb.setLayoutParams(thumbParams);
                 thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
                 if (item.posterBitmap != null) {
                     thumb.setImageBitmap(item.posterBitmap);
                 } else {
-                    thumb.setBackgroundColor(Color.parseColor("#FF9800")); // البرتقالي كما في الويب كاستر
+                    thumb.setBackgroundColor(Color.parseColor("#FF9800"));
                 }
                 row.addView(thumb);
 
-                // تفاصيل الفيديو (العنوان والصيغة)
+                // 2. في المنتصف: العنوان النظيف والصيغة بالأخضر
                 LinearLayout infoLayout = new LinearLayout(BrowserActivity.this);
                 infoLayout.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
@@ -814,14 +831,14 @@ public class BrowserActivity extends Activity {
 
                 TextView tvFormat = new TextView(BrowserActivity.this);
                 tvFormat.setText(item.format);
-                tvFormat.setTextColor(Color.parseColor("#4CAF50")); // الأخضر الأنيق للصيغ
+                tvFormat.setTextColor(Color.parseColor("#4CAF50")); // الأخضر المميز
                 tvFormat.setTextSize(13);
                 tvFormat.setPadding(0, 5, 0, 0);
                 infoLayout.addView(tvFormat);
 
                 row.addView(infoLayout);
 
-                // زر الثلاث نقاط للخيارات
+                // 3. على أقصى اليسار: زر الثلاث نقاط للخيارات
                 TextView tvMore = new TextView(BrowserActivity.this);
                 tvMore.setText("⋮");
                 tvMore.setTextColor(Color.LTGRAY);
@@ -852,8 +869,7 @@ public class BrowserActivity extends Activity {
             public void onClick(View v) {
                 capturedList.clear();
                 btnCast.setText("📺 0");
-                btnCast.setTextColor(Color.LTGRAY);
-                btnCast.setBackgroundColor(Color.parseColor("#333333"));
+                btnCast.setVisibility(View.GONE);
                 dialog.dismiss();
             }
         });
