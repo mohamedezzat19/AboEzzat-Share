@@ -287,7 +287,6 @@ public class BrowserActivity extends Activity {
                 callback.invoke(origin, true, false);
             }
 
-            // تفعيل الميكروفون للبحث الصوتي
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(new Runnable() {
@@ -361,16 +360,23 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                // فلترة دقيقة: استبعاد التقطيع والملفات المؤقتة والإعلانات
                 boolean isChunkOrAd = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") || 
                                       lowerUrl.contains("bytestart") || lowerUrl.contains("adformat") || 
                                       lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
                                       lowerUrl.contains("preview");
 
                 if (!isChunkOrAd) {
-                    // قنص روابط البث الكاملة والمباشرة
                     if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv")) {
-                        addCapturedMedia(reqUrl, "مقطع فيديو كامل");
+                        // محاولة استخراج اسم مميز من مسار الرابط بدلاً من اسم مكرر
+                        String inferredTitle = "فيديو مباشر";
+                        try {
+                            Uri uri = Uri.parse(reqUrl);
+                            String lastSeg = uri.getLastPathSegment();
+                            if (lastSeg != null && lastSeg.length() > 3) {
+                                inferredTitle = lastSeg.replace(".mp4", "").replace(".m3u8", "");
+                            }
+                        } catch (Exception ignored) {}
+                        addCapturedMedia(reqUrl, inferredTitle);
                     }
                 }
 
@@ -385,17 +391,25 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // قنص فوري لروابط يوتيوب الرسمية لتشغيلها على SmartTube مباشرة
                 if (loadedUrl.contains("youtube.com/watch") || loadedUrl.contains("youtu.be")) {
                     addCapturedMedia(loadedUrl, view.getTitle() != null ? view.getTitle() : "فيديو يوتيوب");
                 }
 
+                // سكريبت تخطي إعلانات يوتيوب السريع وسحب أسماء المنشورات
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
                         "}catch(e){}" +
-                        "var skipBtn=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern');" +
-                        "if(skipBtn){skipBtn.click();}" +
+                        "function fastSkipYtAds(){" +
+                        "  var ad = document.querySelector('.ad-showing, .ad-interrupting');" +
+                        "  if(ad){" +
+                        "    var v = document.querySelector('video');" +
+                        "    if(v && !isNaN(v.duration)){ v.currentTime = v.duration; }" +
+                        "  }" +
+                        "  var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
+                        "  if(skipBtn){ skipBtn.click(); }" +
+                        "}" +
+                        "setInterval(fastSkipYtAds, 250);" +
                         "})()";
                 view.loadUrl(js);
             }
@@ -567,7 +581,7 @@ public class BrowserActivity extends Activity {
     private void triggerManualSniff() {
         final WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري فحص الفيديو الصافي...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري فحص الفيديو...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
@@ -575,12 +589,18 @@ public class BrowserActivity extends Activity {
             return;
         }
 
+        // سحب عنوان المنشور المصاحب للفيديو
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
                 "for(var i=0;i<vids.length;i++){" +
                 "  var src=vids[i].currentSrc||vids[i].src;" +
                 "  if(src&&src.indexOf('http')===0&&src.indexOf('blob:')!==0){" +
-                "    window.AboEzzatBridge.onVideoPlaying(src,document.title);" +
+                "    var title=document.title||'مقطع فيديو';" +
+                "    var parent=vids[i].closest('article, [role=\"article\"], div');" +
+                "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
+                "      title = parent.innerText.trim().split('\\n')[0];" +
+                "    }" +
+                "    window.AboEzzatBridge.onVideoPlaying(src, title);" +
                 "  }" +
                 "}" +
                 "})()";
