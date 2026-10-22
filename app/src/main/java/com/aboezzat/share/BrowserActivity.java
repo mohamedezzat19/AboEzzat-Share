@@ -184,9 +184,8 @@ public class BrowserActivity extends Activity {
 
         rootLayout.addView(topBar);
 
-        // شريط تقدم التحميل الأفقي الرفيع أسفل شريط الروابط
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 6)); // سمك 6 بكسل
+        progressBar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 6));
         progressBar.setMax(100);
         progressBar.setProgress(0);
         progressBar.setVisibility(View.GONE);
@@ -296,7 +295,8 @@ public class BrowserActivity extends Activity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
 
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
+        // محاكاة متصفح Chrome الأصلي المتقدم لتجنب كشف الـ WebView
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36");
         settings.setGeolocationEnabled(true);
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -322,7 +322,6 @@ public class BrowserActivity extends Activity {
 
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
-                // منح الإذن فوراً للموقع الجغرافي دون رفض
                 callback.invoke(origin, true, false);
             }
 
@@ -383,6 +382,7 @@ public class BrowserActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
+                // منع التحويل للتطبيقات الرسمية لإجبار فتح كل الفيديوهات داخل المتصفح
                 if (targetUrl.contains("onelink.me") || targetUrl.contains("snssdk") || targetUrl.startsWith("intent://") || !targetUrl.startsWith("http")) {
                     return true;
                 }
@@ -411,7 +411,7 @@ public class BrowserActivity extends Activity {
                         lowerUrl.contains("fbcdn.net") || lowerUrl.contains("cdninstagram.com")) {
                         
                         if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")) {
-                            String inferredTitle = "فيديو مكتشف";
+                            String inferredTitle = "فيديو مباشر";
                             try {
                                 Uri uri = Uri.parse(reqUrl);
                                 String lastSeg = uri.getLastPathSegment();
@@ -435,23 +435,28 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت شامل: محاكاة إحداثيات وموقع مصر كـ VPN + تخطي إعلانات يوتيوب + استمرار الصوت في الخلفية
+                // سكريبت صائد الميديا الذكي (Media Sniffer Hook) المقتبس من المشاريع المفتوحة + محاكاة مصر + استمرار الصوت
                 String js = "javascript:(function(){" +
                         "try{" +
                         "  var egyptPos = { coords: { latitude: 30.0444, longitude: 31.2357, accuracy: 15, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() };" +
-                        "  navigator.geolocation.getCurrentPosition = function(success, error){ success(egyptPos); };" +
-                        "  navigator.geolocation.watchPosition = function(success, error){ success(egyptPos); return 1; };" +
+                        "  navigator.geolocation.getCurrentPosition = function(s){ s(egyptPos); };" +
+                        "  navigator.geolocation.watchPosition = function(s){ s(egyptPos); return 1; };" +
                         "  if(navigator.permissions && navigator.permissions.query){" +
-                        "    navigator.permissions.query = function(q){" +
-                        "      if(q.name === 'geolocation'){ return Promise.resolve({ state: 'granted', onchange: null }); }" +
-                        "      return Promise.resolve({ state: 'denied' });" +
-                        "    };" +
+                        "    navigator.permissions.query = function(q){ return Promise.resolve({ state: q.name === 'geolocation' ? 'granted' : 'denied' }); };" +
                         "  }" +
                         "}catch(e){}" +
                         "try{" +
                         "  Object.defineProperty(document, 'hidden', { get: function(){ return false; }, configurable: true });" +
                         "  Object.defineProperty(document, 'visibilityState', { get: function(){ return 'visible'; }, configurable: true });" +
                         "  document.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true);" +
+                        "}catch(e){}" +
+                        "try{" +
+                        "  var origPlay = HTMLMediaElement.prototype.play;" +
+                        "  HTMLMediaElement.prototype.play = function(){" +
+                        "    var src = this.currentSrc || this.src;" +
+                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlaying(src, document.title || 'فيديو مباشر'); }" +
+                        "    return origPlay.apply(this, arguments);" +
+                        "  };" +
                         "}catch(e){}" +
                         "function fastSkipYtAds(){" +
                         "  var ad = document.querySelector('.ad-showing, .ad-interrupting');" +
@@ -559,7 +564,6 @@ public class BrowserActivity extends Activity {
         }
         etUrl.setText(target);
 
-        // إرسال ترويسات IP مصري حقيقي (TE Data) لتثبيت الموقع على جمهورية مصر العربية
         Map<String, String> extraHeaders = new HashMap<String, String>();
         extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
         extraHeaders.put("X-Forwarded-For", "156.210.12.1");
@@ -638,7 +642,7 @@ public class BrowserActivity extends Activity {
     private void triggerManualSniff() {
         final WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري فحص الفيديو...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري فحص وتأكيد الفيديو...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("watch") || curUrl.contains("youtu.be"))) {
@@ -647,20 +651,20 @@ public class BrowserActivity extends Activity {
         }
 
         String js = "javascript:(function(){" +
-                "var vids=document.getElementsByTagName('video');" +
-                "for(var i=0;i<vids.length;i++){" +
-                "  var src=vids[i].currentSrc||vids[i].src;" +
-                "  if(!src || src.indexOf('blob:')===0){" +
-                "    var s=vids[i].getElementsByTagName('source');" +
-                "    if(s.length>0){ src=s[0].src; }" +
+                "var vids = document.getElementsByTagName('video');" +
+                "for(var i=0; i<vids.length; i++){" +
+                "  var src = vids[i].currentSrc || vids[i].src;" +
+                "  if(!src || src.indexOf('blob:') === 0){" +
+                "    var s = vids[i].getElementsByTagName('source');" +
+                "    if(s.length > 0){ src = s[0].src; }" +
                 "  }" +
-                "  if(src && src.indexOf('http')===0){" +
-                "    var title=document.title||'مقطع فيديو';" +
-                "    var parent=vids[i].closest('article, [role=\"article\"], div');" +
+                "  if(src && src.indexOf('http') === 0){" +
+                "    var title = document.title || 'مقطع فيديو';" +
+                "    var parent = vids[i].closest('article, [role=\"article\"], div');" +
                 "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
-                "      var lines=parent.innerText.trim().split('\\n');" +
-                "      for(var k=0;k<lines.length;k++){" +
-                "        if(lines[k].trim().length > 3){ title=lines[k].trim(); break; }" +
+                "      var lines = parent.innerText.trim().split('\\n');" +
+                "      for(var k=0; k<lines.length; k++){" +
+                "        if(lines[k].trim().length > 3){ title = lines[k].trim(); break; }" +
                 "      }" +
                 "    }" +
                 "    window.AboEzzatBridge.onVideoPlaying(src, title);" +
@@ -672,7 +676,7 @@ public class BrowserActivity extends Activity {
 
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
-            Toast.makeText(this, "لا توجد فيديوهات، شغل الفيديو واضغط 🎯", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "لا توجد فيديوهات مكتشفة، شغل الفيديو أولاً ثم اضغط 🎯", Toast.LENGTH_SHORT).show();
             return;
         }
 
