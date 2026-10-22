@@ -34,6 +34,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -64,6 +65,7 @@ public class BrowserActivity extends Activity {
     private LinearLayout rootLayout;
     private LinearLayout topBar;
     private LinearLayout bottomBar;
+    private ProgressBar progressBar;
     private FrameLayout webContainer;
     private FrameLayout fullScreenContainer;
 
@@ -182,6 +184,14 @@ public class BrowserActivity extends Activity {
 
         rootLayout.addView(topBar);
 
+        // شريط تقدم التحميل الأفقي الرفيع أسفل شريط الروابط
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 6)); // سمك 6 بكسل
+        progressBar.setMax(100);
+        progressBar.setProgress(0);
+        progressBar.setVisibility(View.GONE);
+        rootLayout.addView(progressBar);
+
         FrameLayout baseFrame = new FrameLayout(this);
         webContainer = new FrameLayout(this);
         fullScreenContainer = new FrameLayout(this);
@@ -297,7 +307,22 @@ public class BrowserActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                super.onProgressChanged(view, newProgress);
+                if (getCurrentWebView() == view) {
+                    if (newProgress < 100) {
+                        progressBar.setVisibility(View.VISIBLE);
+                        progressBar.setProgress(newProgress);
+                    } else {
+                        progressBar.setProgress(100);
+                        progressBar.setVisibility(View.GONE);
+                    }
+                }
+            }
+
+            @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                // منح الإذن فوراً للموقع الجغرافي دون رفض
                 callback.invoke(origin, true, false);
             }
 
@@ -321,6 +346,7 @@ public class BrowserActivity extends Activity {
                 customViewCallback = callback;
 
                 topBar.setVisibility(View.GONE);
+                progressBar.setVisibility(View.GONE);
                 bottomBar.setVisibility(View.GONE);
                 webContainer.setVisibility(View.GONE);
 
@@ -381,7 +407,8 @@ public class BrowserActivity extends Activity {
 
                 if (!isChunkOrAd) {
                     if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
-                        lowerUrl.contains("pull-flv") || lowerUrl.contains("mime=video") || lowerUrl.contains("fbcdn.net") || lowerUrl.contains("cdninstagram.com")) {
+                        lowerUrl.contains("pull-flv") || lowerUrl.contains("mime=video") || 
+                        lowerUrl.contains("fbcdn.net") || lowerUrl.contains("cdninstagram.com")) {
                         
                         if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")) {
                             String inferredTitle = "فيديو مكتشف";
@@ -408,14 +435,23 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
+                // سكريبت شامل: محاكاة إحداثيات وموقع مصر كـ VPN + تخطي إعلانات يوتيوب + استمرار الصوت في الخلفية
                 String js = "javascript:(function(){" +
                         "try{" +
-                        "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
+                        "  var egyptPos = { coords: { latitude: 30.0444, longitude: 31.2357, accuracy: 15, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() };" +
+                        "  navigator.geolocation.getCurrentPosition = function(success, error){ success(egyptPos); };" +
+                        "  navigator.geolocation.watchPosition = function(success, error){ success(egyptPos); return 1; };" +
+                        "  if(navigator.permissions && navigator.permissions.query){" +
+                        "    navigator.permissions.query = function(q){" +
+                        "      if(q.name === 'geolocation'){ return Promise.resolve({ state: 'granted', onchange: null }); }" +
+                        "      return Promise.resolve({ state: 'denied' });" +
+                        "    };" +
+                        "  }" +
                         "}catch(e){}" +
                         "try{" +
-                        "Object.defineProperty(document, 'hidden', { get: function(){ return false; }, configurable: true });" +
-                        "Object.defineProperty(document, 'visibilityState', { get: function(){ return 'visible'; }, configurable: true });" +
-                        "document.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true);" +
+                        "  Object.defineProperty(document, 'hidden', { get: function(){ return false; }, configurable: true });" +
+                        "  Object.defineProperty(document, 'visibilityState', { get: function(){ return 'visible'; }, configurable: true });" +
+                        "  document.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true);" +
                         "}catch(e){}" +
                         "function fastSkipYtAds(){" +
                         "  var ad = document.querySelector('.ad-showing, .ad-interrupting');" +
@@ -523,9 +559,12 @@ public class BrowserActivity extends Activity {
         }
         etUrl.setText(target);
 
+        // إرسال ترويسات IP مصري حقيقي (TE Data) لتثبيت الموقع على جمهورية مصر العربية
         Map<String, String> extraHeaders = new HashMap<String, String>();
         extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
         extraHeaders.put("X-Forwarded-For", "156.210.12.1");
+        extraHeaders.put("Client-IP", "156.210.12.1");
+        extraHeaders.put("X-Real-IP", "156.210.12.1");
 
         current.loadUrl(target, extraHeaders);
     }
