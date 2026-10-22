@@ -21,6 +21,8 @@ import android.widget.Toast;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.URLEncoder;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import fi.iki.elonen.NanoHTTPD;
 import okhttp3.Call;
@@ -45,6 +47,113 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         startLocalServer();
 
+        // فحص إذا كان التطبيق تم فتحه عبر زر المشاركة
+        if (handleIncomingShareIntent(getIntent())) {
+            return;
+        }
+
+        buildMainUi();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingShareIntent(intent);
+    }
+
+    private boolean handleIncomingShareIntent(Intent intent) {
+        if (intent == null) return false;
+        String action = intent.getAction();
+        if (Intent.ACTION_SEND.equals(action) && intent.getType() != null) {
+            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (sharedText != null) {
+                Pattern pattern = Pattern.compile("https?://\\S+");
+                Matcher matcher = pattern.matcher(sharedText);
+                if (matcher.find()) {
+                    String extractedUrl = matcher.group(0);
+                    processSharedLink(extractedUrl);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void processSharedLink(String url) {
+        String lowerUrl = url.toLowerCase();
+
+        // 1. روابط البث المباشر للشاشة "خبط لزق" (يوتيوب، تيك توك العادي، تويتر/X، ثريدز)
+        boolean isDirectCast = (lowerUrl.contains("youtube.com") || lowerUrl.contains("youtu.be") ||
+                                lowerUrl.contains("tiktok.com") || lowerUrl.contains("twitter.com") || 
+                                lowerUrl.contains("x.com") || lowerUrl.contains("threads.net"))
+                                && !lowerUrl.contains("/live");
+
+        if (isDirectCast) {
+            castUrlDirectlyToTv(url);
+        } else {
+            // 2. الروابط التي تحتاج إلى فحص وتخطي حماية (فيسبوك، إنستجرام، لايف تيك توك، ومواقع الأفلام)
+            openInBrowser(url);
+        }
+    }
+
+    private void castUrlDirectlyToTv(String mediaUrl) {
+        String tvIp = prefs.getString("tv_ip", "").trim();
+        if (tvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً في التطبيق", Toast.LENGTH_LONG).show();
+            buildMainUi();
+            return;
+        }
+
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+                endpoint = "http://" + endpoint;
+            }
+            if (!endpoint.contains(":8080")) {
+                endpoint = endpoint + ":8080";
+            }
+
+            String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
+            Request req = new Request.Builder().url(fullUrl).build();
+            client.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, java.io.IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد من تشغيل الشاشة والـ IP", Toast.LENGTH_LONG).show();
+                            finish();
+                        }
+                    });
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل على الشاشة فوراً ✓", Toast.LENGTH_SHORT).show();
+                            finish();
+                        }
+                    });
+                }
+            });
+        } catch (Exception e) {
+            Toast.makeText(this, "خطأ في معالجة الرابط", Toast.LENGTH_SHORT).show();
+            finish();
+        }
+    }
+
+    private void openInBrowser(String url) {
+        Intent browserIntent = new Intent(this, BrowserActivity.class);
+        browserIntent.setAction(Intent.ACTION_VIEW);
+        browserIntent.setData(Uri.parse(url));
+        startActivity(browserIntent);
+        finish();
+    }
+
+    private void buildMainUi() {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(40, 60, 40, 40);
@@ -223,7 +332,6 @@ public class MainActivity extends Activity {
             String uriPath = session.getUri();
 
             if (selectedMediaUri != null) {
-                // عرض الصور بصفحة شاشة كاملة نظيفة
                 if ("/view_image".equals(uriPath)) {
                     String phoneIp = getDeviceIpAddress();
                     String html = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
@@ -233,7 +341,6 @@ public class MainActivity extends Activity {
                     return newFixedLengthResponse(Response.Status.OK, "text/html", html);
                 }
 
-                // بث ملفات الفيديو أو الصوت أو الصورة الخام
                 if ("/media".equals(uriPath)) {
                     try {
                         AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(selectedMediaUri, "r");
