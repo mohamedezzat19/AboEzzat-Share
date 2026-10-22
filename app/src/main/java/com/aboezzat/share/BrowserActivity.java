@@ -47,6 +47,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -224,7 +226,41 @@ public class BrowserActivity extends Activity {
 
         setContentView(rootLayout);
 
-        addNewTab("about:home");
+        // فحص إذا كان التطبيق تم فتحه عبر زر المشاركة من تطبيق آخر
+        String incomingUrl = extractSharedUrl(getIntent());
+        if (incomingUrl != null && !incomingUrl.isEmpty()) {
+            addNewTab(incomingUrl);
+        } else {
+            addNewTab("about:home");
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String incomingUrl = extractSharedUrl(intent);
+        if (incomingUrl != null && !incomingUrl.isEmpty()) {
+            addNewTab(incomingUrl);
+        }
+    }
+
+    private String extractSharedUrl(Intent intent) {
+        if (intent == null) return null;
+        String action = intent.getAction();
+        if (Intent.ACTION_SEND.equals(action) && "text/plain".equals(intent.getType())) {
+            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (sharedText != null) {
+                Pattern pattern = Pattern.compile("https?://\\S+");
+                Matcher matcher = pattern.matcher(sharedText);
+                if (matcher.find()) {
+                    return matcher.group(0);
+                }
+            }
+        } else if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
+            return intent.getData().toString();
+        }
+        return null;
     }
 
     private Button createBottomButton(String text, View.OnClickListener listener) {
@@ -366,8 +402,9 @@ public class BrowserActivity extends Activity {
                                       lowerUrl.contains("preview");
 
                 if (!isChunkOrAd) {
-                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains("pull-flv")) {
-                        // محاولة استخراج اسم مميز من مسار الرابط بدلاً من اسم مكرر
+                    // شروط موسعة تشمل مواقع الفيديو والمشغلات المختلفة
+                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
+                        lowerUrl.contains("pull-flv") || lowerUrl.contains("mime=video") || lowerUrl.contains("format=mp4")) {
                         String inferredTitle = "فيديو مباشر";
                         try {
                             Uri uri = Uri.parse(reqUrl);
@@ -395,7 +432,6 @@ public class BrowserActivity extends Activity {
                     addCapturedMedia(loadedUrl, view.getTitle() != null ? view.getTitle() : "فيديو يوتيوب");
                 }
 
-                // سكريبت تخطي إعلانات يوتيوب السريع وسحب أسماء المنشورات
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
@@ -581,7 +617,7 @@ public class BrowserActivity extends Activity {
     private void triggerManualSniff() {
         final WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري فحص الفيديو...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري فحص الفيديو المعروض...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("youtube.com/watch") || curUrl.contains("youtu.be"))) {
@@ -589,14 +625,29 @@ public class BrowserActivity extends Activity {
             return;
         }
 
-        // سحب عنوان المنشور المصاحب للفيديو
+        // سكريبت ذكي لفحص الفيديو المعروض أمام العين حالياً (خاص بالريلز وإنستجرام ومواقع الأفلام)
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
+                "var targetVideo=null;" +
+                "var maxVisibleArea=0;" +
+                "var winH=window.innerHeight;" +
                 "for(var i=0;i<vids.length;i++){" +
-                "  var src=vids[i].currentSrc||vids[i].src;" +
-                "  if(src&&src.indexOf('http')===0&&src.indexOf('blob:')!==0){" +
+                "  var rect=vids[i].getBoundingClientRect();" +
+                "  var visibleH=Math.max(0, Math.min(rect.bottom, winH) - Math.max(rect.top, 0));" +
+                "  if(visibleH > maxVisibleArea){" +
+                "    maxVisibleArea = visibleH;" +
+                "    targetVideo = vids[i];" +
+                "  }" +
+                "}" +
+                "if(targetVideo){" +
+                "  var src=targetVideo.currentSrc||targetVideo.src;" +
+                "  if(!src || src.indexOf('blob:')===0){" +
+                "    var sources=targetVideo.getElementsByTagName('source');" +
+                "    if(sources.length>0){ src=sources[0].src; }" +
+                "  }" +
+                "  if(src && src.indexOf('http')===0){" +
                 "    var title=document.title||'مقطع فيديو';" +
-                "    var parent=vids[i].closest('article, [role=\"article\"], div');" +
+                "    var parent=targetVideo.closest('article, [role=\"article\"], div');" +
                 "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
                 "      title = parent.innerText.trim().split('\\n')[0];" +
                 "    }" +
