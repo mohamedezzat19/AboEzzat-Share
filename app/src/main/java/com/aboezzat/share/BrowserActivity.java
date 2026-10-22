@@ -48,8 +48,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -236,40 +234,11 @@ public class BrowserActivity extends Activity {
 
         setContentView(rootLayout);
 
-        String incomingUrl = extractSharedUrl(getIntent());
-        if (incomingUrl != null && !incomingUrl.isEmpty()) {
-            addNewTab(incomingUrl);
-        } else {
-            addNewTab("about:home");
+        String startUrl = "about:home";
+        if (getIntent() != null && getIntent().getData() != null) {
+            startUrl = getIntent().getData().toString();
         }
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        String incomingUrl = extractSharedUrl(intent);
-        if (incomingUrl != null && !incomingUrl.isEmpty()) {
-            addNewTab(incomingUrl);
-        }
-    }
-
-    private String extractSharedUrl(Intent intent) {
-        if (intent == null) return null;
-        String action = intent.getAction();
-        if (Intent.ACTION_SEND.equals(action) && intent.getType() != null) {
-            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
-            if (sharedText != null) {
-                Pattern pattern = Pattern.compile("https?://\\S+");
-                Matcher matcher = pattern.matcher(sharedText);
-                if (matcher.find()) {
-                    return matcher.group(0);
-                }
-            }
-        } else if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
-            return intent.getData().toString();
-        }
-        return null;
+        addNewTab(startUrl);
     }
 
     private Button createBottomButton(String text, View.OnClickListener listener) {
@@ -404,6 +373,30 @@ public class BrowserActivity extends Activity {
                         return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream("".getBytes()));
                     }
                 }
+
+                boolean isChunkOrAd = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") || 
+                                      lowerUrl.contains("bytestart") || lowerUrl.contains("adformat") || 
+                                      lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
+                                      lowerUrl.contains("preview");
+
+                if (!isChunkOrAd) {
+                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
+                        lowerUrl.contains("pull-flv") || lowerUrl.contains("mime=video") || lowerUrl.contains("fbcdn.net") || lowerUrl.contains("cdninstagram.com")) {
+                        
+                        if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")) {
+                            String inferredTitle = "فيديو مكتشف";
+                            try {
+                                Uri uri = Uri.parse(reqUrl);
+                                String lastSeg = uri.getLastPathSegment();
+                                if (lastSeg != null && lastSeg.length() > 3) {
+                                    inferredTitle = lastSeg.replace(".mp4", "").replace(".m3u8", "");
+                                }
+                            } catch (Exception ignored) {}
+                            addCapturedMedia(reqUrl, inferredTitle);
+                        }
+                    }
+                }
+
                 return super.shouldInterceptRequest(view, request);
             }
 
@@ -415,7 +408,6 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت تخطي إعلانات يوتيوب + منع إيقاف الصوت عند قفل الشاشة (حجب visibilitychange)
                 String js = "javascript:(function(){" +
                         "try{" +
                         "navigator.geolocation.getCurrentPosition = function(s){s({coords:{latitude:31.0409,longitude:31.3785,accuracy:20}});};" +
@@ -607,7 +599,7 @@ public class BrowserActivity extends Activity {
     private void triggerManualSniff() {
         final WebView current = getCurrentWebView();
         if (current == null) return;
-        Toast.makeText(this, "جاري فحص الفيديو المعروض...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "جاري فحص الفيديو...", Toast.LENGTH_SHORT).show();
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("watch") || curUrl.contains("youtu.be"))) {
@@ -617,26 +609,15 @@ public class BrowserActivity extends Activity {
 
         String js = "javascript:(function(){" +
                 "var vids=document.getElementsByTagName('video');" +
-                "var targetVideo=null;" +
-                "var maxArea=0;" +
-                "var winH=window.innerHeight;" +
                 "for(var i=0;i<vids.length;i++){" +
-                "  var r=vids[i].getBoundingClientRect();" +
-                "  var visibleH=Math.max(0, Math.min(r.bottom, winH) - Math.max(r.top, 0));" +
-                "  if(visibleH > maxArea){" +
-                "    maxArea = visibleH;" +
-                "    targetVideo = vids[i];" +
-                "  }" +
-                "}" +
-                "if(targetVideo){" +
-                "  var src=targetVideo.currentSrc||targetVideo.src;" +
+                "  var src=vids[i].currentSrc||vids[i].src;" +
                 "  if(!src || src.indexOf('blob:')===0){" +
-                "    var s=targetVideo.getElementsByTagName('source');" +
+                "    var s=vids[i].getElementsByTagName('source');" +
                 "    if(s.length>0){ src=s[0].src; }" +
                 "  }" +
                 "  if(src && src.indexOf('http')===0){" +
                 "    var title=document.title||'مقطع فيديو';" +
-                "    var parent=targetVideo.closest('article, [role=\"article\"], div');" +
+                "    var parent=vids[i].closest('article, [role=\"article\"], div');" +
                 "    if(parent && parent.innerText && parent.innerText.trim().length > 0){" +
                 "      var lines=parent.innerText.trim().split('\\n');" +
                 "      for(var k=0;k<lines.length;k++){" +
@@ -696,31 +677,13 @@ public class BrowserActivity extends Activity {
                         if (which == 0) {
                             castToTv(media.url);
                         } else if (which == 1) {
-                            handleDownloadRequest(media.url, false);
+                            downloadMedia(media.url, false);
                         } else if (which == 2) {
-                            handleDownloadRequest(media.url, true);
+                            downloadMedia(media.url, true);
                         }
                     }
                 })
                 .show();
-    }
-
-    private void handleDownloadRequest(String mediaUrl, boolean audioOnly) {
-        if (mediaUrl.contains("youtube.com") || mediaUrl.contains("youtu.be")) {
-            new AlertDialog.Builder(this)
-                    .setTitle("تنبيه بخصوص يوتيوب")
-                    .setMessage("روابط يوتيوب مشفرة ومصممة للبث للشاشة مباشرة عبر SmartTube. لتنزيل الفيديو يمكنك استخدام البث، أو نسخه لتطبيق تنزيل متخصص.")
-                    .setPositiveButton("بث للشاشة الآن", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            castToTv(mediaUrl);
-                        }
-                    })
-                    .setNegativeButton("إلغاء", null)
-                    .show();
-            return;
-        }
-        downloadMedia(mediaUrl, audioOnly);
     }
 
     private void castToTv(String mediaUrl) {
@@ -880,10 +843,9 @@ public class BrowserActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        // إبقاء مشغل الميديا مستمراً في الخلفية وعند قفل الشاشة دون إيقافه
         if (wakeLock != null && !wakeLock.isHeld()) {
             try {
-                wakeLock.acquire(60 * 60 * 1000L); // ساعة تشغيل مستمر في الخلفية
+                wakeLock.acquire(60 * 60 * 1000L);
             } catch (Exception ignored) {}
         }
     }
