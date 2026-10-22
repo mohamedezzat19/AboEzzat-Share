@@ -37,10 +37,7 @@ public class MainActivity extends Activity {
     private static final int PICK_MEDIA_REQUEST = 101;
     private EditText etTvIp;
     private SharedPreferences prefs;
-    private final OkHttpClient client = new OkHttpClient.Builder()
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .build();
+    private final OkHttpClient client = new OkHttpClient();
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
 
@@ -83,61 +80,27 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private void processSharedLink(final String url) {
+    private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
 
-        // المنصات المعقدة تذهب للمتصفح فقط
+        // فقط فيسبوك وإنستجرام ولايف تيك توك تذهب للمتصفح
         boolean isComplexSite = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
                                 lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com") || 
-                                lowerUrl.contains("/live") || lowerUrl.contains("likee") || 
-                                lowerUrl.contains("kwai");
+                                lowerUrl.contains("/live");
 
         if (isComplexSite) {
             openInBrowser(url);
-            return;
-        }
-
-        Toast.makeText(this, "جاري تحضير البث للشاشة...", Toast.LENGTH_SHORT).show();
-
-        // حل روابط تيك توك وتويتر المختصرة لتشغيلها خبط لزق
-        if (lowerUrl.contains("tiktok.com") || lowerUrl.contains("t.co") || lowerUrl.contains("twitter.com") || lowerUrl.contains("x.com")) {
-            resolveAndCast(url);
         } else {
+            // يوتيوب، تويتر (X و t.co)، ثريدز (threads.net)، وتيك توك العادي تبث للشاشة فوراً خبط لزق
             castUrlDirectlyToTv(url);
         }
-    }
-
-    private void resolveAndCast(final String shortUrl) {
-        Request request = new Request.Builder()
-                .url(shortUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .build();
-
-        client.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                // في حال فشل التتبع نرسل الرابط الأصلي مباشرة
-                castUrlDirectlyToTv(shortUrl);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) {
-                String finalUrl = response.request().url().toString();
-                castUrlDirectlyToTv(finalUrl);
-            }
-        });
     }
 
     private void castUrlDirectlyToTv(String mediaUrl) {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(MainActivity.this, "يرجى إدخال IP الشاشة أولاً في التطبيق", Toast.LENGTH_LONG).show();
-                    buildMainUi();
-                }
-            });
+            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً في التطبيق", Toast.LENGTH_LONG).show();
+            buildMainUi();
             return;
         }
 
@@ -158,7 +121,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد من الشاشة والـ IP", Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة: تأكد من تشغيلها وتوصيل الشبكة", Toast.LENGTH_LONG).show();
                             finish();
                         }
                     });
@@ -169,20 +132,15 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل فوراً على الشاشة ✓", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل على الشاشة فوراً ✓", Toast.LENGTH_SHORT).show();
                             finish();
                         }
                     });
                 }
             });
         } catch (Exception e) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(MainActivity.this, "خطأ في معالجة الرابط", Toast.LENGTH_SHORT).show();
-                    finish();
-                }
-            });
+            Toast.makeText(this, "خطأ في معالجة الرابط", Toast.LENGTH_SHORT).show();
+            finish();
         }
     }
 
@@ -312,7 +270,7 @@ public class MainActivity extends Activity {
     private void castLocalMediaToTv() {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى إدخال IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -347,7 +305,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد أن الشاشة والهاتف على نفس الشبكة", Toast.LENGTH_LONG).show();
                         }
                     });
                 }
