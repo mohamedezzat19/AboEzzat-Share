@@ -189,7 +189,6 @@ public class BrowserActivity extends Activity {
         sniffParams.setMargins(0, 0, 5, 0);
         topBar.addView(btnSniff, sniffParams);
 
-        // زر البث الأصفر التفاعلي - مخفي في البداية تماماً مثل Web Video Caster
         btnCast = new Button(this);
         btnCast.setText("📺 0");
         btnCast.setTextSize(13);
@@ -265,9 +264,14 @@ public class BrowserActivity extends Activity {
 
         setContentView(rootLayout);
 
+        // هنا التعديل: قراءة الرابط القادم من ShareActivity أو من أي رابط خارجي
         String startUrl = "about:home";
-        if (getIntent() != null && getIntent().getData() != null) {
-            startUrl = getIntent().getData().toString();
+        if (getIntent() != null) {
+            if (getIntent().getStringExtra("url") != null) {
+                startUrl = getIntent().getStringExtra("url");
+            } else if (getIntent().getData() != null) {
+                startUrl = getIntent().getData().toString();
+            }
         }
         addNewTab(startUrl);
     }
@@ -420,14 +424,12 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                // فلترة الأجزاء التافهة المزعجة
                 boolean isJunkChunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
                                       lowerUrl.contains("bytestart=") || lowerUrl.contains("adformat") ||
                                       lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
                                       lowerUrl.contains("preview");
 
                 if (!isJunkChunk) {
-                    // التقاط FLV (تيك توك لايف) و M3U8 (تويتر وبثوث الأفلام) و MP4
                     if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-") || 
                         lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
                         lowerUrl.contains("mime=video")) {
@@ -465,7 +467,6 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت صائد الميديا النشط وسحب البوستر وعنوان الميتا
                 String js = "javascript:(function(){" +
                         "try{" +
                         "  var egyptPos = { coords: { latitude: 30.0444, longitude: 31.2357, accuracy: 15, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() };" +
@@ -545,7 +546,6 @@ public class BrowserActivity extends Activity {
     }
 
     private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl) {
-        // فلترة التكرار للروابط المتشابهة و manifest
         for (CapturedMedia item : capturedList) {
             if (item.url.equalsIgnoreCase(url) || (item.url.contains("manifest") && url.contains("manifest"))) {
                 if (item.posterUrl == null && posterUrl != null) {
@@ -570,7 +570,6 @@ public class BrowserActivity extends Activity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                // إظهار زر الـ Cast وتشغيل الوميض الأصفر (Pulse Animation) كما في الويب كاستر
                 btnCast.setVisibility(View.VISIBLE);
                 btnCast.setText("📺 " + capturedList.size());
 
@@ -626,7 +625,7 @@ public class BrowserActivity extends Activity {
 
         capturedList.clear();
         btnCast.setText("📺 0");
-        btnCast.setVisibility(View.GONE); // إعادة إخفاء الزر عند فتح صفحة جديدة
+        btnCast.setVisibility(View.GONE);
 
         if (!target.startsWith("http://") && !target.startsWith("https://")) {
             try {
@@ -744,7 +743,6 @@ public class BrowserActivity extends Activity {
         current.loadUrl(js);
     }
 
-    // تصميم قائمة الفيديوهات بالترتيب العربي المطابق لـ Web Video Caster بالمللي
     private void showMediaListDialog() {
         if (capturedList.isEmpty()) {
             Toast.makeText(this, "لا توجد فيديوهات مكتشفة، شغل الفيديو أولاً ثم اضغط 🎯", Toast.LENGTH_SHORT).show();
@@ -766,7 +764,7 @@ public class BrowserActivity extends Activity {
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(Color.parseColor("#181818"));
         main.setPadding(25, 25, 25, 25);
-        main.setLayoutDirection(View.LAYOUT_DIRECTION_RTL); // اتجاه عربي أصيل
+        main.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
         TextView header = new TextView(this);
         header.setText("قائمة الفيديوهات (" + capturedList.size() + ")");
@@ -801,7 +799,6 @@ public class BrowserActivity extends Activity {
                 row.setBackgroundColor(Color.parseColor("#1F1F1F"));
                 row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
-                // 1. على اليمين: الصورة المصغرة أو المربع البرتقالي المميز
                 ImageView thumb = new ImageView(BrowserActivity.this);
                 LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
                 thumbParams.setMargins(0, 0, 18, 0);
@@ -815,7 +812,6 @@ public class BrowserActivity extends Activity {
                 }
                 row.addView(thumb);
 
-                // 2. في المنتصف: العنوان النظيف والصيغة بالأخضر
                 LinearLayout infoLayout = new LinearLayout(BrowserActivity.this);
                 infoLayout.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
@@ -831,14 +827,13 @@ public class BrowserActivity extends Activity {
 
                 TextView tvFormat = new TextView(BrowserActivity.this);
                 tvFormat.setText(item.format);
-                tvFormat.setTextColor(Color.parseColor("#4CAF50")); // الأخضر المميز
+                tvFormat.setTextColor(Color.parseColor("#4CAF50"));
                 tvFormat.setTextSize(13);
                 tvFormat.setPadding(0, 5, 0, 0);
                 infoLayout.addView(tvFormat);
 
                 row.addView(infoLayout);
 
-                // 3. على أقصى اليسار: زر الثلاث نقاط للخيارات
                 TextView tvMore = new TextView(BrowserActivity.this);
                 tvMore.setText("⋮");
                 tvMore.setTextColor(Color.LTGRAY);
