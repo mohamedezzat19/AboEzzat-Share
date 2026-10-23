@@ -2,11 +2,13 @@ package com.aboezzat.share;
 
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetFileDescriptor;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +21,8 @@ import android.widget.Toast;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +49,6 @@ public class MainActivity extends Activity {
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
 
-    // دعم تشغيل ألبوم الصور المتتابع (Slideshow)
     private final List<Uri> slideshowQueue = new ArrayList<>();
     private int currentSlideIndex = 0;
     private final Handler slideHandler = new Handler(Looper.getMainLooper());
@@ -56,7 +59,7 @@ public class MainActivity extends Activity {
                 currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
                 selectedMediaUri = slideshowQueue.get(currentSlideIndex);
                 castLocalMediaToTv(false);
-                slideHandler.postDelayed(this, 5000); // تغيير كل 5 ثوانٍ
+                slideHandler.postDelayed(this, 5000);
             }
         }
     };
@@ -87,6 +90,8 @@ public class MainActivity extends Activity {
             tvStatusBadge.setText("● متصل: " + savedIp);
         }
 
+        tvStatusBadge.setOnClickListener(v -> scanForTvIp());
+
         btnSave.setOnClickListener(v -> {
             String ip = etTvIp.getText().toString().trim();
             prefs.edit().putString("tv_ip", ip).apply();
@@ -100,12 +105,61 @@ public class MainActivity extends Activity {
         });
 
         findViewById(R.id.card_local_media).setOnClickListener(v -> openMediaPicker(false));
-
         findViewById(R.id.card_slideshow).setOnClickListener(v -> openMediaPicker(true));
 
+        // التحكم بالتشغيل والتقديم/التأخير
         findViewById(R.id.btn_play_pause).setOnClickListener(v -> sendRemoteCommand("toggle_play"));
         findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rewind"));
         findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("forward"));
+
+        // أزرار التالي والسابق الجديدة
+        findViewById(R.id.btn_next).setOnClickListener(v -> sendRemoteCommand("next"));
+        findViewById(R.id.btn_prev).setOnClickListener(v -> sendRemoteCommand("prev"));
+
+        // أزرار التحكم بالصوت
+        findViewById(R.id.btn_vol_up).setOnClickListener(v -> sendRemoteCommand("vol_up"));
+        findViewById(R.id.btn_vol_down).setOnClickListener(v -> sendRemoteCommand("vol_down"));
+        findViewById(R.id.btn_mute).setOnClickListener(v -> sendRemoteCommand("mute"));
+    }
+
+    private void scanForTvIp() {
+        tvStatusBadge.setText("🔍 جاري البحث...");
+        Toast.makeText(this, "جاري فحص الشبكة لاكتشاف الشاشة...", Toast.LENGTH_SHORT).show();
+
+        AsyncTask.execute(() -> {
+            String phoneIp = getDeviceIpAddress();
+            if (phoneIp.isEmpty() || !phoneIp.contains(".")) {
+                runOnUiThread(() -> tvStatusBadge.setText("● تأكد من الواي فاي"));
+                return;
+            }
+
+            String subnet = phoneIp.substring(0, phoneIp.lastIndexOf(".") + 1);
+            String foundIp = null;
+
+            for (int i = 1; i < 255; i++) {
+                String testIp = subnet + i;
+                try {
+                    Socket socket = new Socket();
+                    socket.connect(new InetSocketAddress(testIp, 8080), 35);
+                    socket.close();
+                    foundIp = testIp;
+                    break;
+                } catch (Exception ignored) {}
+            }
+
+            final String finalFound = foundIp;
+            runOnUiThread(() -> {
+                if (finalFound != null) {
+                    etTvIp.setText(finalFound);
+                    prefs.edit().putString("tv_ip", finalFound).apply();
+                    tvStatusBadge.setText("● متصل: " + finalFound);
+                    Toast.makeText(MainActivity.this, "تم العثور على الشاشة وحفظها: " + finalFound, Toast.LENGTH_LONG).show();
+                } else {
+                    tvStatusBadge.setText("● لم تكتشف");
+                    Toast.makeText(MainActivity.this, "تعذر كشف الشاشة تلقائياً، تأكد أنها متصلة", Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
     }
 
     @Override
@@ -134,17 +188,19 @@ public class MainActivity extends Activity {
 
     private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
-        boolean isComplexSite = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
-                                lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com") || 
-                                lowerUrl.contains("/live");
 
-        if (isComplexSite) {
+        // فيسبوك وإنستجرام فقط يحتاجان دخول المتصفح للاستخراج
+        boolean isBrowserRequired = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
+                                    lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com");
+
+        if (isBrowserRequired) {
             Intent browserIntent = new Intent(this, BrowserActivity.class);
             browserIntent.setAction(Intent.ACTION_VIEW);
             browserIntent.setData(Uri.parse(url));
             startActivity(browserIntent);
             finish();
         } else {
+            // ثريدز (threads.net)، يوتيوب، تيك توك، تويتر/X تذهب مباشرة للشاشة فوراً
             castUrlDirectlyToTv(url);
         }
     }
@@ -166,15 +222,23 @@ public class MainActivity extends Activity {
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show();
+                        finish();
+                    });
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل فوراً ✓", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل فوراً ✓", Toast.LENGTH_SHORT).show();
+                        finish();
+                    });
                 }
             });
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            finish();
+        }
     }
 
     private void openMediaPicker(boolean multipleImages) {
@@ -224,7 +288,7 @@ public class MainActivity extends Activity {
                     castLocalMediaToTv(true);
                     if (slideshowQueue.size() > 1) {
                         slideHandler.postDelayed(slideRunnable, 5000);
-                        Toast.makeText(this, "بدأ العرض التقديمي (" + slideshowQueue.size() + " صور)", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "بدأ العرض التقديمي للصور (" + slideshowQueue.size() + ")", Toast.LENGTH_SHORT).show();
                     }
                 }
             }
@@ -239,7 +303,7 @@ public class MainActivity extends Activity {
 
     private String getDeviceIpAddress() {
         try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             if (wm != null) {
                 int ip = wm.getConnectionInfo().getIpAddress();
                 return Formatter.formatIpAddress(ip);
@@ -262,13 +326,8 @@ public class MainActivity extends Activity {
         }
 
         String mime = getContentResolver().getType(selectedMediaUri);
-        String targetUrl;
-        // إرسال رابط الصورة الصريح مباشرة دون أي طبقة HTML وسيطة
-        if (mime != null && mime.startsWith("image/")) {
-            targetUrl = "http://" + phoneIp + ":8088/media.jpg";
-        } else {
-            targetUrl = "http://" + phoneIp + ":8088/media";
-        }
+        String targetUrl = (mime != null && mime.startsWith("image/")) ?
+                "http://" + phoneIp + ":8088/media.jpg" : "http://" + phoneIp + ":8088/media.mp4";
 
         try {
             String endpoint = tvIp;
