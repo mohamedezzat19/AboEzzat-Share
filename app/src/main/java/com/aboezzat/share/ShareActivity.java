@@ -27,16 +27,19 @@ import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ShareActivity extends Activity {
 
     private final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -95,20 +98,27 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب يُرسل مباشرة للشاشة
+        // 1. يوتيوب (مباشر للشاشة دون أي تعديل)
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. تيك توك العادي عبر API السريع بدون متصفح
+        // 2. تيك توك العادي عبر API tikwm الخارق (دون أي تعديل)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. تويتر، ثريدز، فيسبوك، إنستجرام، ولايف تيك توك عبر القناص الفوري
+        // 3. إنستجرام وثريدز (استخراج الرابط المدمج بصوت وصورة)
+        if (url.contains("instagram.com") || url.contains("threads.net")) {
+            Toast.makeText(this, "جاري استخراج فيديو بصوت وصورة...", Toast.LENGTH_SHORT).show();
+            extractInstagramAndThreads(url);
+            return;
+        }
+
+        // 4. تويتر، فيسبوك، ولايف تيك توك عبر القناص التلقائي
         Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
         startSniffing(url);
     }
@@ -147,6 +157,64 @@ public class ShareActivity extends Activity {
         }
     }
 
+    private void extractInstagramAndThreads(final String originalUrl) {
+        try {
+            // استخدام واجهة عامة لدمج واستخراج مسار الفيديو مع الصوت معاً
+            String cleanUrl = originalUrl.split("\\?")[0];
+            String endpoint = "https://api.cobalt.tools/api/json";
+
+            JSONObject jsonPayload = new JSONObject();
+            jsonPayload.put("url", cleanUrl);
+
+            RequestBody body = RequestBody.create(
+                    MediaType.parse("application/json; charset=utf-8"),
+                    jsonPayload.toString()
+            );
+
+            Request request = new Request.Builder()
+                    .url(endpoint)
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body)
+                    .build();
+
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    mainHandler.post(() -> startSniffing(originalUrl));
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    try {
+                        if (response.isSuccessful() && response.body() != null) {
+                            String respData = response.body().string();
+                            JSONObject json = new JSONObject(respData);
+
+                            // رابط الفيديو المباشر المدمج بصوته
+                            String streamUrl = json.optString("url");
+                            if (streamUrl.isEmpty() && json.has("picker")) {
+                                JSONArray picker = json.getJSONArray("picker");
+                                if (picker.length() > 0) {
+                                    streamUrl = picker.getJSONObject(0).optString("url");
+                                }
+                            }
+
+                            if (!streamUrl.isEmpty()) {
+                                sendToTv(targetTvIp, streamUrl);
+                                return;
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    // إذا تعذر الاستخراج نعود فوراً للقناص
+                    mainHandler.post(() -> startSniffing(originalUrl));
+                }
+            });
+        } catch (Exception e) {
+            startSniffing(originalUrl);
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private void startSniffing(String url) {
         isCaptured = false;
@@ -156,8 +224,7 @@ public class ShareActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        
-        // متصفح أندرويد لفتح فيديوهات الموبايل المباشرة
+
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
