@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,6 +22,7 @@ import android.widget.Toast;
 
 import java.io.IOException;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,7 +42,6 @@ public class ShareActivity extends Activity {
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private FrameLayout rootLayout;
     private WebView webView;
     private boolean isCaptured = false;
     private String targetTvIp = "";
@@ -49,7 +50,7 @@ public class ShareActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        rootLayout = new FrameLayout(this);
+        FrameLayout rootLayout = new FrameLayout(this);
         rootLayout.setBackgroundColor(Color.TRANSPARENT);
         ProgressBar progressBar = new ProgressBar(this);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
@@ -74,6 +75,15 @@ public class ShareActivity extends Activity {
                 }
             }
         }
+
+        if (Intent.ACTION_SEND_MULTIPLE.equals(action) && type != null) {
+            ArrayList<Uri> mediaUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (mediaUris != null && !mediaUris.isEmpty()) {
+                sendMultipleMedia(mediaUris);
+                return;
+            }
+        }
+
         finish();
     }
 
@@ -91,36 +101,26 @@ public class ShareActivity extends Activity {
         targetTvIp = prefs.getString("tv_ip", "").trim();
 
         if (targetTvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة من داخل التطبيق أولاً", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        // 1. يوتيوب (كما هو)
+        // 1. يوتيوب (مباشر)
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
-            sendToTv(targetTvIp, url);
+            sendToTv(targetTvIp, url, false);
             return;
         }
 
-        // 2. تيك توك العادي (كما هو عبر tikwm)
-        if (url.contains("tiktok.com") && !url.contains("/live")) {
+        // 2. تيك توك العادي فقط (الفيديوهات المسجلة)
+        if (url.contains("tiktok.com") && !url.contains("/live") && !url.contains("live.tiktok.com")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. إنستجرام فقط: فتح المتصفح التفاعلي لرؤية الصفحة والتفاعل معها
-        if (url.contains("instagram.com")) {
-            Toast.makeText(this, "جاري فتح إنستجرام في المتصفح...", Toast.LENGTH_SHORT).show();
-            Intent browserIntent = new Intent(this, BrowserActivity.class);
-            browserIntent.putExtra("url", url);
-            startActivity(browserIntent);
-            finish();
-            return;
-        }
-
-        // 4. تويتر، فيسبوك، ثريدز، ولايف تيك توك (القناص الصامت الأصلي كما هو)
-        Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
+        // 3. ثريدز، تويتر، لايف تيك توك، فيسبوك
+        Toast.makeText(this, "جاري قنص البث للشاشة...", Toast.LENGTH_SHORT).show();
         startSniffing(url);
     }
 
@@ -145,7 +145,7 @@ public class ShareActivity extends Activity {
                             String play = data.optString("play");
                             if (!play.isEmpty()) {
                                 if (!play.startsWith("http")) play = "https://www.tikwm.com" + play;
-                                sendToTv(targetTvIp, play);
+                                sendToTv(targetTvIp, play, false);
                                 return;
                             }
                         }
@@ -162,13 +162,13 @@ public class ShareActivity extends Activity {
     private void startSniffing(String url) {
         isCaptured = false;
         webView = new WebView(this);
-        rootLayout.addView(webView, new FrameLayout.LayoutParams(1, 1));
-
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
+
+        // User-Agent الخفيف الأصلي اللي ثريدز وتيك توك بيقبلوه بدون حظر
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
@@ -190,14 +190,17 @@ public class ShareActivity extends Activity {
             public void onPageFinished(WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
                 String js = "(function() { " +
-                        "   var vids = document.getElementsByTagName('video'); " +
-                        "   for (var i = 0; i < vids.length; i++) { " +
-                        "       try { vids[i].play(); } catch(e){} " +
-                        "       var src = vids[i].currentSrc || vids[i].src; " +
-                        "       if (src && src.startsWith('http')) { " +
-                        "           window.MediaSniffer.onMediaFound(src); " +
+                        "   try { " +
+                        "       var vids = document.getElementsByTagName('video'); " +
+                        "       for (var i = 0; i < vids.length; i++) { " +
+                        "           vids[i].muted = true; " +
+                        "           vids[i].play(); " +
+                        "           var src = vids[i].currentSrc || vids[i].src; " +
+                        "           if (src && src.startsWith('http')) { " +
+                        "               window.MediaSniffer.onMediaFound(src); " +
+                        "           } " +
                         "       } " +
-                        "   } " +
+                        "   } catch(e){} " +
                         "})();";
                 view.evaluateJavascript(js, null);
             }
@@ -207,7 +210,7 @@ public class ShareActivity extends Activity {
 
         mainHandler.postDelayed(() -> {
             if (!isCaptured) {
-                Toast.makeText(ShareActivity.this, "تعذر قنص الفيديو تلقائياً", Toast.LENGTH_SHORT).show();
+                Toast.makeText(ShareActivity.this, "تعذر قنص البث تلقائياً، جرب فتحه بالمتصفح", Toast.LENGTH_SHORT).show();
                 destroyWebView();
                 finish();
             }
@@ -219,26 +222,29 @@ public class ShareActivity extends Activity {
 
         String lower = reqUrl.toLowerCase();
 
+        // استبعاد الملفات التافهة والصور
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
-            lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
-            lower.contains("preview")) {
+                lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
+                lower.contains("preview") || lower.contains(".ico")) {
             return;
         }
 
-        boolean isLiveStream = lower.contains(".m3u8") ||
-                               lower.contains(".flv") ||
-                               lower.contains("pull-flv") ||
-                               lower.contains("pull-hls") ||
-                               lower.contains("live-hls");
+        // 1. قنص لايف تيك توك الصريح (مثل الذي استخرجه Web Video Caster)
+        boolean isTikTokLive = (lower.contains("pull-") && lower.contains("tiktokcdn.com")) ||
+                               (lower.contains("tiktokcdn.com") && (lower.contains(".flv") || lower.contains(".m3u8")));
 
-        boolean isDirectVideo = (lower.contains(".mp4") && !lower.contains("bytestart=")) ||
+        // 2. قنص فيديوهات ثريدز وتويتر وفيسبوك
+        boolean isDirectMedia = lower.contains(".mp4") ||
+                                lower.contains(".m3u8") ||
                                 lower.contains("video_playback") ||
-                                lower.contains("&mime=video");
+                                lower.contains("&mime=video") ||
+                                (lower.contains("cdninstagram.com") && lower.contains("/v/")) ||
+                                (lower.contains("threads.net") && lower.contains("video"));
 
-        if (isLiveStream || isDirectVideo) {
+        if (isTikTokLive || isDirectMedia) {
             isCaptured = true;
             mainHandler.post(() -> {
-                sendToTv(targetTvIp, reqUrl);
+                sendToTv(targetTvIp, reqUrl, false);
                 destroyWebView();
             });
         }
@@ -246,16 +252,13 @@ public class ShareActivity extends Activity {
 
     private void destroyWebView() {
         if (webView != null) {
-            try {
-                rootLayout.removeView(webView);
-                webView.stopLoading();
-                webView.destroy();
-            } catch (Exception ignored) {}
+            webView.stopLoading();
+            webView.destroy();
             webView = null;
         }
     }
 
-    private void sendToTv(String tvIp, String mediaUrl) {
+    private void sendToTv(String tvIp, String mediaUrl, boolean isQueue) {
         try {
             if (!tvIp.startsWith("http://") && !tvIp.startsWith("https://")) {
                 tvIp = "http://" + tvIp;
@@ -264,14 +267,15 @@ public class ShareActivity extends Activity {
                 tvIp = tvIp + ":8080";
             }
 
-            String fullUrl = tvIp + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
+            String paramName = isQueue ? "queue" : "url";
+            String fullUrl = tvIp + "/?" + paramName + "=" + URLEncoder.encode(mediaUrl, "UTF-8");
             Request request = new Request.Builder().url(fullUrl).build();
 
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تعذر الإرسال للشاشة: تأكد من تشغيل الشاشة والـ IP", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
@@ -279,13 +283,32 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onResponse(Call call, Response response) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, isQueue ? "تمت الإضافة لقائمة التشغيل ✓" : "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
             });
         } catch (Exception e) {
             mainHandler.post(this::finish);
+        }
+    }
+
+    private void sendMultipleMedia(ArrayList<Uri> uris) {
+        SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
+        targetTvIp = prefs.getString("tv_ip", "").trim();
+
+        if (targetTvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
+
+        Toast.makeText(this, "جاري إرسال قائمة الفيديوهات للشاشة...", Toast.LENGTH_SHORT).show();
+
+        for (int i = 0; i < uris.size(); i++) {
+            final boolean isQueue = (i > 0);
+            final String fileUrl = uris.get(i).toString();
+            mainHandler.postDelayed(() -> sendToTv(targetTvIp, fileUrl, isQueue), i * 350L);
         }
     }
 
