@@ -219,7 +219,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- لوحة التحكم الكاملة (شريط الريموت) -->
+        <!-- لوحة التحكم الكاملة (شريط الريموت المحدث) -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -237,7 +237,7 @@
             android:background="#1B1C23"
             android:padding="12dp">
 
-            <!-- صف التالي والتشغيل والسابق -->
+            <!-- صف التالي والتشغيل والسابق (معكوس ومضبوط) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -246,11 +246,11 @@
                 android:gravity="center">
 
                 <Button
-                    android:id="@+id/btn_prev"
+                    android:id="@+id/btn_next"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="⏮️ السابق"
+                    android:text="التالي ⏭️"
                     android:textColor="#FFFFFF"
                     android:backgroundTint="#2D303E"
                     android:layout_marginEnd="3dp" />
@@ -266,33 +266,23 @@
                     android:layout_marginHorizontal="3dp" />
 
                 <Button
-                    android:id="@+id/btn_next"
+                    android:id="@+id/btn_prev"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="التالي ⏭️"
+                    android:text="⏮️ السابق"
                     android:textColor="#FFFFFF"
                     android:backgroundTint="#2D303E"
                     android:layout_marginStart="3dp" />
             </LinearLayout>
 
-            <!-- صف التقديم والتأخير السريع -->
+            <!-- صف التقديم والتأخير السريع (تقديم يمين وتأخير شمال) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:layout_marginBottom="8dp"
                 android:gravity="center">
-
-                <Button
-                    android:id="@+id/btn_rewind"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="⏪ 10s تأخير"
-                    android:textColor="#FFFFFF"
-                    android:backgroundTint="#262833"
-                    android:layout_marginEnd="4dp" />
 
                 <Button
                     android:id="@+id/btn_forward"
@@ -302,10 +292,20 @@
                     android:text="10s تقديم ⏩"
                     android:textColor="#FFFFFF"
                     android:backgroundTint="#262833"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_rewind"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="⏪ 10s تأخير"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#262833"
                     android:layout_marginStart="4dp" />
             </LinearLayout>
 
-            <!-- صف أزرار الصوت (تقليل - كتم - تعلية) -->
+            <!-- صف أزرار الصوت (تعلية يمين - كتم وسط - تقليل شمال) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -313,11 +313,11 @@
                 android:gravity="center">
 
                 <Button
-                    android:id="@+id/btn_vol_down"
+                    android:id="@+id/btn_vol_up"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="🔉 تقليل"
+                    android:text="🔊 تعلية"
                     android:textColor="#FFFFFF"
                     android:backgroundTint="#262833"
                     android:layout_marginEnd="4dp" />
@@ -333,11 +333,11 @@
                     android:layout_marginHorizontal="4dp" />
 
                 <Button
-                    android:id="@+id/btn_vol_up"
+                    android:id="@+id/btn_vol_down"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="🔊 تعلية"
+                    android:text="🔉 تقليل"
                     android:textColor="#FFFFFF"
                     android:backgroundTint="#262833"
                     android:layout_marginStart="4dp" />
