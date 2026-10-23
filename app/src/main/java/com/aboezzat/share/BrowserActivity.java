@@ -100,18 +100,22 @@ public class BrowserActivity extends Activity {
         public String format;
         public String posterUrl;
         public Bitmap posterBitmap;
+        public boolean isAudio;
 
-        public CapturedMedia(String url, String title, String format, String posterUrl) {
+        public CapturedMedia(String url, String title, String format, String posterUrl, boolean isAudio) {
             this.url = url;
             this.title = title;
             this.format = format;
             this.posterUrl = posterUrl;
+            this.isAudio = isAudio;
         }
     }
 
     private final List<CapturedMedia> capturedList = Collections.synchronizedList(new ArrayList<CapturedMedia>());
     private final OkHttpClient client = new OkHttpClient();
     private String tvIp = "";
+    private String lastDiscoveredPoster = "";
+    private String lastDiscoveredTitle = "";
 
     private final List<String> adDomains = Arrays.asList(
             "doubleclick.net", "googleads", "pagead2", "adservice.google",
@@ -423,36 +427,34 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                // فلترة الملفات غير المرغوبة بدون استبعاد مسارات DASH الخاصة بإنستجرام
                 boolean isJunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
                                  lowerUrl.contains(".js") || lowerUrl.contains(".css") ||
                                  lowerUrl.contains("preview") || lowerUrl.contains("rsrc.php");
 
                 if (!isJunk) {
-                    // التقاط الفيديو الصريح أو مسار إنستجرام وفك التجزئة
                     if (lowerUrl.contains(".mp4") || lowerUrl.contains(".flv") || 
                         lowerUrl.contains("pull-") || lowerUrl.contains(".m3u8") || 
                         lowerUrl.contains("mime=video") || lowerUrl.contains("fbcdn.net")) {
                         
-                        // تنظيف الرابط من التجزئة ليعمل كملف كامل
                         String cleanMedia = reqUrl;
                         if (cleanMedia.contains("&bytestart=")) {
                             cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
                         }
 
-                        String format = "-mp4";
-                        if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "-flv";
-                        else if (lowerUrl.contains(".m3u8")) format = "-m3u8";
+                        boolean isAudioTrack = lowerUrl.contains("audio") || lowerUrl.contains("dash_ln_heaac");
+                        String format = isAudioTrack ? "🎵 مسار صوت" : "🎬 مسار فيديو";
+                        if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "📡 بث حي - flv";
+                        else if (lowerUrl.contains(".m3u8")) format = "📡 بث مباشر - m3u8";
 
-                        String cleanName = "فيديو مباشر";
+                        String cleanName = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : "مقطع إنستجرام";
                         try {
                             String pageTitle = view.getTitle();
-                            if (pageTitle != null && !pageTitle.isEmpty() && !pageTitle.contains("http")) {
+                            if (pageTitle != null && !pageTitle.isEmpty() && !pageTitle.contains("http") && !pageTitle.contains("Instagram")) {
                                 cleanName = pageTitle;
                             }
                         } catch (Exception ignored) {}
 
-                        addCapturedMedia(cleanMedia, cleanName, format, null);
+                        addCapturedMedia(cleanMedia, cleanName, format, lastDiscoveredPoster, isAudioTrack);
                     }
                 }
 
@@ -467,19 +469,22 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // سكريبت صائد الميديا النشط وسحب البوستر وعنوان الميتا
+                // كود جافاسكريبت لجلب اسم المنشور الحقيقي وبوستر الفيديو من الميتا تاجز
                 String js = "javascript:(function(){" +
+                        "try{" +
+                        "  var title = '';" +
+                        "  var poster = '';" +
+                        "  var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
+                        "  if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
+                        "  var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                        "  if(metaImg && metaImg.content){ poster = metaImg.content; }" +
+                        "  window.AboEzzatBridge.onMetaFound(title, poster);" +
+                        "}catch(e){}" +
                         "try{" +
                         "  var origPlay = HTMLMediaElement.prototype.play;" +
                         "  HTMLMediaElement.prototype.play = function(){" +
                         "    var src = this.currentSrc || this.src;" +
-                        "    var poster = this.poster || '';" +
-                        "    if(!poster){" +
-                        "      var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
-                        "      if(metaImg){ poster = metaImg.content; }" +
-                        "    }" +
-                        "    var t = document.title || 'فيديو مباشر';" +
-                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlayingWithPoster(src, t, poster); }" +
+                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlayingWithPoster(src, '', ''); }" +
                         "    return origPlay.apply(this, arguments);" +
                         "  };" +
                         "}catch(e){}" +
@@ -502,16 +507,37 @@ public class BrowserActivity extends Activity {
 
     private class JsBridge {
         @JavascriptInterface
+        public void onMetaFound(String title, String posterUrl) {
+            if (title != null && !title.isEmpty()) {
+                lastDiscoveredTitle = title.replace("Instagram: ", "").replace("on Instagram", "").trim();
+            }
+            if (posterUrl != null && !posterUrl.isEmpty()) {
+                lastDiscoveredPoster = posterUrl;
+            }
+            // تحديث العناوين والصور الملتقطة مسبقاً إذا كانت بدون اسم
+            for (CapturedMedia item : capturedList) {
+                if (item.posterBitmap == null && !lastDiscoveredPoster.isEmpty()) {
+                    item.posterUrl = lastDiscoveredPoster;
+                    loadThumbnailAsync(item);
+                }
+                if (!lastDiscoveredTitle.isEmpty() && item.title.equals("مقطع إنستجرام")) {
+                    item.title = lastDiscoveredTitle;
+                }
+            }
+        }
+
+        @JavascriptInterface
         public void onVideoPlayingWithPoster(String mediaUrl, String title, String posterUrl) {
             if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
                 String cleanMedia = mediaUrl;
                 if (cleanMedia.contains("&bytestart=")) {
                     cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
                 }
-                String format = "-mp4";
-                if (cleanMedia.contains(".flv") || cleanMedia.contains("pull-")) format = "-flv";
-                else if (cleanMedia.contains(".m3u8")) format = "-m3u8";
-                addCapturedMedia(cleanMedia, title, format, posterUrl);
+                boolean isAudioTrack = cleanMedia.contains("audio") || cleanMedia.contains("dash_ln_heaac");
+                String format = isAudioTrack ? "🎵 مسار صوت" : "🎬 مسار فيديو";
+                String realTitle = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : "مقطع إنستجرام";
+                String realPoster = !posterUrl.isEmpty() ? posterUrl : lastDiscoveredPoster;
+                addCapturedMedia(cleanMedia, realTitle, format, realPoster, isAudioTrack);
             }
         }
 
@@ -527,7 +553,7 @@ public class BrowserActivity extends Activity {
         }
     }
 
-    private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl) {
+    private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl, boolean isAudio) {
         for (CapturedMedia item : capturedList) {
             if (item.url.equalsIgnoreCase(url) || (item.url.contains("manifest") && url.contains("manifest"))) {
                 if (item.posterUrl == null && posterUrl != null) {
@@ -539,10 +565,10 @@ public class BrowserActivity extends Activity {
         }
 
         String cleanTitle = (title != null && !title.isEmpty()) ? title : "مقطع فيديو";
-        if (cleanTitle.length() > 55) {
-            cleanTitle = cleanTitle.substring(0, 55) + "...";
+        if (cleanTitle.length() > 50) {
+            cleanTitle = cleanTitle.substring(0, 50) + "...";
         }
-        final CapturedMedia newMedia = new CapturedMedia(url, cleanTitle, format, posterUrl);
+        final CapturedMedia newMedia = new CapturedMedia(url, cleanTitle, format, posterUrl, isAudio);
         capturedList.add(0, newMedia);
 
         if (posterUrl != null && !posterUrl.isEmpty()) {
@@ -606,6 +632,8 @@ public class BrowserActivity extends Activity {
         if (current == null || target.isEmpty()) return;
 
         capturedList.clear();
+        lastDiscoveredPoster = "";
+        lastDiscoveredTitle = "";
         btnCast.setText("📺 0");
         btnCast.setVisibility(View.GONE);
 
@@ -696,26 +724,26 @@ public class BrowserActivity extends Activity {
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("watch") || curUrl.contains("youtu.be"))) {
-            addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب", "-mp4", null);
+            addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب", "🎬 فيديو مباشر", null, false);
             return;
         }
 
-        // سكريبت متقدم لفحص مصادر الفيديو وأيضاً وسم الميتا المباشر الخاص بإنستجرام
         String js = "javascript:(function(){" +
+                "var title = ''; var poster = '';" +
+                "var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
+                "if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
+                "var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                "if(metaImg && metaImg.content){ poster = metaImg.content; }" +
+                "if(title || poster){ window.AboEzzatBridge.onMetaFound(title, poster); }" +
                 "var meta = document.querySelector('meta[property=\"og:video\"], meta[property=\"og:video:secure_url\"]');" +
                 "if(meta && meta.content){" +
-                "  window.AboEzzatBridge.onVideoPlayingWithPoster(meta.content, document.title || 'ريل إنستجرام', '');" +
+                "  window.AboEzzatBridge.onVideoPlayingWithPoster(meta.content, title || 'ريل إنستجرام', poster);" +
                 "}" +
                 "var vids = document.getElementsByTagName('video');" +
                 "for(var i=0; i<vids.length; i++){" +
                 "  var src = vids[i].currentSrc || vids[i].src;" +
-                "  var poster = vids[i].poster || '';" +
-                "  if(!poster){" +
-                "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
-                "    if(metaImg){ poster = metaImg.content; }" +
-                "  }" +
                 "  if(src && src.indexOf('http') === 0){" +
-                "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, document.title || 'مقطع فيديو', poster);" +
+                "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, title || document.title, poster);" +
                 "  }" +
                 "}" +
                 "})()";
@@ -738,17 +766,17 @@ public class BrowserActivity extends Activity {
         dialog.show();
     }
 
+    // تصميم القائمة بالترتيب المطلوب: الثلاث نقط على اليمين خالص، الاسم في النص، والصورة على الشمال
     private View buildMediaListView(final Dialog dialog) {
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
         main.setBackgroundColor(Color.parseColor("#181818"));
-        main.setPadding(25, 25, 25, 25);
-        main.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        main.setPadding(20, 20, 20, 20);
 
         TextView header = new TextView(this);
-        header.setText("قائمة الفيديوهات (" + capturedList.size() + ")");
+        header.setText("قائمة الفيديوهات المكتشفة (" + capturedList.size() + ")");
         header.setTextColor(Color.WHITE);
-        header.setTextSize(18);
+        header.setTextSize(17);
         header.setGravity(Gravity.CENTER);
         header.setPadding(0, 10, 0, 20);
         main.addView(header);
@@ -773,27 +801,23 @@ public class BrowserActivity extends Activity {
 
                 LinearLayout row = new LinearLayout(BrowserActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setPadding(15, 20, 15, 20);
+                row.setPadding(15, 18, 15, 18);
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setBackgroundColor(Color.parseColor("#1F1F1F"));
-                row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
 
-                ImageView thumb = new ImageView(BrowserActivity.this);
-                LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
-                thumbParams.setMargins(0, 0, 18, 0);
-                thumb.setLayoutParams(thumbParams);
-                thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                // 1. على اليمين خالص: زر الثلاث نقط ⋮
+                TextView tvMore = new TextView(BrowserActivity.this);
+                tvMore.setText("⋮");
+                tvMore.setTextColor(Color.WHITE);
+                tvMore.setTextSize(24);
+                tvMore.setPadding(10, 0, 20, 0);
+                row.addView(tvMore);
 
-                if (item.posterBitmap != null) {
-                    thumb.setImageBitmap(item.posterBitmap);
-                } else {
-                    thumb.setBackgroundColor(Color.parseColor("#FF9800"));
-                }
-                row.addView(thumb);
-
+                // 2. في المنتصف: العنوان الحقيقي والصيغة مع مسافات مريحة
                 LinearLayout infoLayout = new LinearLayout(BrowserActivity.this);
                 infoLayout.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+                infoParams.setMargins(10, 0, 15, 0);
                 infoLayout.setLayoutParams(infoParams);
 
                 TextView tvTitle = new TextView(BrowserActivity.this);
@@ -806,19 +830,25 @@ public class BrowserActivity extends Activity {
 
                 TextView tvFormat = new TextView(BrowserActivity.this);
                 tvFormat.setText(item.format);
-                tvFormat.setTextColor(Color.parseColor("#4CAF50"));
-                tvFormat.setTextSize(13);
-                tvFormat.setPadding(0, 5, 0, 0);
+                tvFormat.setTextColor(item.isAudio ? Color.parseColor("#FF9800") : Color.parseColor("#4CAF50"));
+                tvFormat.setTextSize(12);
+                tvFormat.setPadding(0, 4, 0, 0);
                 infoLayout.addView(tvFormat);
 
                 row.addView(infoLayout);
 
-                TextView tvMore = new TextView(BrowserActivity.this);
-                tvMore.setText("⋮");
-                tvMore.setTextColor(Color.LTGRAY);
-                tvMore.setTextSize(22);
-                tvMore.setPadding(20, 0, 10, 0);
-                row.addView(tvMore);
+                // 3. على الشمال خالص: صورة البوستر الحقيقية للمقطع
+                ImageView thumb = new ImageView(BrowserActivity.this);
+                LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
+                thumb.setLayoutParams(thumbParams);
+                thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+
+                if (item.posterBitmap != null) {
+                    thumb.setImageBitmap(item.posterBitmap);
+                } else {
+                    thumb.setBackgroundColor(Color.parseColor("#2C2C2C"));
+                }
+                row.addView(thumb);
 
                 row.setOnClickListener(new View.OnClickListener() {
                     @Override
@@ -856,9 +886,10 @@ public class BrowserActivity extends Activity {
 
     private void showMediaOptionsDialog(final CapturedMedia media) {
         String[] options = {
-                "📺 بث للشاشة الآن (Cast to TV)",
-                "🎬 تحميل الفيديو بأعلى جودة (Full HD MP4)",
-                "🎵 تحميل الصوت فقط (Audio MP3)"
+                "🔗 دمج وبث بصوت وصورة (Merge & Cast)",
+                "📺 بث هذا المسار منفرداً (Cast Single Track)",
+                "🎬 تحميل الفيديو (MP4)",
+                "🎵 تحميل الصوت فقط (MP3)"
         };
 
         new AlertDialog.Builder(this)
@@ -867,15 +898,48 @@ public class BrowserActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         if (which == 0) {
-                            castToTv(media.url);
+                            mergeAndCastToTv();
                         } else if (which == 1) {
-                            downloadMedia(media.url, false);
+                            castToTv(media.url);
                         } else if (which == 2) {
+                            downloadMedia(media.url, false);
+                        } else if (which == 3) {
                             downloadMedia(media.url, true);
                         }
                     }
                 })
                 .show();
+    }
+
+    // دمج مسار الصوت مع مسار الصورة وإرسال الرابط المكتمل للشاشة
+    private void mergeAndCastToTv() {
+        String videoTrackUrl = "";
+        String audioTrackUrl = "";
+
+        for (CapturedMedia m : capturedList) {
+            if (m.isAudio && audioTrackUrl.isEmpty()) {
+                audioTrackUrl = m.url;
+            } else if (!m.isAudio && videoTrackUrl.isEmpty()) {
+                videoTrackUrl = m.url;
+            }
+        }
+
+        if (videoTrackUrl.isEmpty()) {
+            Toast.makeText(this, "تعذر العثور على مسار الفيديو للدمج", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (audioTrackUrl.isEmpty()) {
+            // إذا لم يتوفر مسار صوت منفصل، يبث الفيديو مباشرة
+            castToTv(videoTrackUrl);
+            return;
+        }
+
+        Toast.makeText(this, "جاري تحضير البث المدمج بالصوت والصورة...", Toast.LENGTH_SHORT).show();
+
+        // إرسال زوج الروابط للشاشة معاً ليقوم ExoPlayer بتشغيلهما متزامنين
+        String combinedUrl = videoTrackUrl + "##EXT_AUDIO##" + audioTrackUrl;
+        castToTv(combinedUrl);
     }
 
     private void castToTv(String mediaUrl) {
