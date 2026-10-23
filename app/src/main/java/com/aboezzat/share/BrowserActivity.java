@@ -41,6 +41,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -100,14 +101,17 @@ public class BrowserActivity extends Activity {
         public String format;
         public String posterUrl;
         public Bitmap posterBitmap;
+        public int mediaType; // 1: فيديو مؤكد | 2: صوت مؤكد | 0: غير معروف
         public boolean isAudio;
+        public boolean isSelected = false;
 
-        public CapturedMedia(String url, String title, String format, String posterUrl, boolean isAudio) {
+        public CapturedMedia(String url, String title, String format, String posterUrl, int mediaType) {
             this.url = url;
             this.title = title;
             this.format = format;
             this.posterUrl = posterUrl;
-            this.isAudio = isAudio;
+            this.mediaType = mediaType;
+            this.isAudio = (mediaType == 2);
         }
     }
 
@@ -434,19 +438,29 @@ public class BrowserActivity extends Activity {
                 if (!isJunk) {
                     if (lowerUrl.contains(".mp4") || lowerUrl.contains(".flv") || 
                         lowerUrl.contains("pull-") || lowerUrl.contains(".m3u8") || 
-                        lowerUrl.contains("mime=video") || lowerUrl.contains("fbcdn.net")) {
+                        lowerUrl.contains("mime=video") || lowerUrl.contains("mime=audio") || 
+                        lowerUrl.contains("fbcdn.net")) {
                         
                         String cleanMedia = reqUrl;
                         if (cleanMedia.contains("&bytestart=")) {
                             cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
                         }
 
-                        boolean isAudioTrack = lowerUrl.contains("audio") || lowerUrl.contains("dash_ln_heaac");
-                        String format = isAudioTrack ? "🎵 مسار صوت" : "🎬 مسار فيديو";
-                        if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "📡 بث حي - flv";
-                        else if (lowerUrl.contains(".m3u8")) format = "📡 بث مباشر - m3u8";
+                        // تصنيف فوري دقيق: 1 فيديو | 2 صوت | 0 غير معروف
+                        int type = 0;
+                        String format = "⚠️ مسار غير معروف";
 
-                        String cleanName = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : "مقطع إنستجرام";
+                        if (lowerUrl.contains("audio") || lowerUrl.contains("dash_ln_heaac") || (lowerUrl.contains("bytestart=0") && lowerUrl.contains("mime=audio"))) {
+                            type = 2;
+                            format = "🎵 مسار صوت مؤكد";
+                        } else if (lowerUrl.contains("video") || lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".flv")) {
+                            type = 1;
+                            format = "🎬 مسار فيديو مؤكد";
+                            if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "📡 بث حي - flv";
+                            else if (lowerUrl.contains(".m3u8")) format = "📡 بث مباشر - m3u8";
+                        }
+
+                        String cleanName = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : "مقطع وسائط";
                         try {
                             String pageTitle = view.getTitle();
                             if (pageTitle != null && !pageTitle.isEmpty() && !pageTitle.contains("http") && !pageTitle.contains("Instagram")) {
@@ -454,7 +468,7 @@ public class BrowserActivity extends Activity {
                             }
                         } catch (Exception ignored) {}
 
-                        addCapturedMedia(cleanMedia, cleanName, format, lastDiscoveredPoster, isAudioTrack);
+                        addCapturedMedia(cleanMedia, cleanName, format, lastDiscoveredPoster, type);
                     }
                 }
 
@@ -518,7 +532,7 @@ public class BrowserActivity extends Activity {
                     item.posterUrl = lastDiscoveredPoster;
                     loadThumbnailAsync(item);
                 }
-                if (!lastDiscoveredTitle.isEmpty() && item.title.equals("مقطع إنستجرام")) {
+                if (!lastDiscoveredTitle.isEmpty() && (item.title.equals("مقطع إنستجرام") || item.title.equals("مقطع وسائط"))) {
                     item.title = lastDiscoveredTitle;
                 }
             }
@@ -531,11 +545,21 @@ public class BrowserActivity extends Activity {
                 if (cleanMedia.contains("&bytestart=")) {
                     cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
                 }
-                boolean isAudioTrack = cleanMedia.contains("audio") || cleanMedia.contains("dash_ln_heaac");
-                String format = isAudioTrack ? "🎵 مسار صوت" : "🎬 مسار فيديو";
-                String realTitle = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : "مقطع إنستجرام";
+                
+                int type = 0;
+                String lower = cleanMedia.toLowerCase();
+                String format = "⚠️ مسار غير معروف";
+                if (lower.contains("audio") || lower.contains("dash_ln_heaac")) {
+                    type = 2;
+                    format = "🎵 مسار صوت مؤكد";
+                } else if (lower.contains(".mp4") || lower.contains(".m3u8") || lower.contains(".flv")) {
+                    type = 1;
+                    format = "🎬 مسار فيديو مؤكد";
+                }
+
+                String realTitle = !lastDiscoveredTitle.isEmpty() ? lastDiscoveredTitle : (!title.isEmpty() ? title : "مقطع وسائط");
                 String realPoster = !posterUrl.isEmpty() ? posterUrl : lastDiscoveredPoster;
-                addCapturedMedia(cleanMedia, realTitle, format, realPoster, isAudioTrack);
+                addCapturedMedia(cleanMedia, realTitle, format, realPoster, type);
             }
         }
 
@@ -551,7 +575,7 @@ public class BrowserActivity extends Activity {
         }
     }
 
-    private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl, boolean isAudio) {
+    private synchronized void addCapturedMedia(String url, String title, String format, String posterUrl, int mediaType) {
         for (CapturedMedia item : capturedList) {
             if (item.url.equalsIgnoreCase(url) || (item.url.contains("manifest") && url.contains("manifest"))) {
                 if (item.posterUrl == null && posterUrl != null) {
@@ -566,7 +590,7 @@ public class BrowserActivity extends Activity {
         if (cleanTitle.length() > 50) {
             cleanTitle = cleanTitle.substring(0, 50) + "...";
         }
-        final CapturedMedia newMedia = new CapturedMedia(url, cleanTitle, format, posterUrl, isAudio);
+        final CapturedMedia newMedia = new CapturedMedia(url, cleanTitle, format, posterUrl, mediaType);
         capturedList.add(0, newMedia);
 
         if (posterUrl != null && !posterUrl.isEmpty()) {
@@ -722,7 +746,7 @@ public class BrowserActivity extends Activity {
 
         String curUrl = current.getUrl();
         if (curUrl != null && (curUrl.contains("watch") || curUrl.contains("youtu.be"))) {
-            addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب", "🎬 فيديو مباشر", null, false);
+            addCapturedMedia(curUrl, current.getTitle() != null ? current.getTitle() : "فيديو يوتيوب", "🎬 فيديو مباشر", null, 1);
             return;
         }
 
@@ -771,11 +795,11 @@ public class BrowserActivity extends Activity {
         main.setPadding(20, 20, 20, 20);
 
         TextView header = new TextView(this);
-        header.setText("قائمة الفيديوهات المكتشفة (" + capturedList.size() + ")");
+        header.setText("قائمة المسارات (" + capturedList.size() + ") - حدد بالـ ☑ للدمج اليدوي");
         header.setTextColor(Color.WHITE);
-        header.setTextSize(17);
+        header.setTextSize(16);
         header.setGravity(Gravity.CENTER);
-        header.setPadding(0, 10, 0, 20);
+        header.setPadding(0, 10, 0, 15);
         main.addView(header);
 
         ListView listView = new ListView(this);
@@ -798,34 +822,43 @@ public class BrowserActivity extends Activity {
 
                 LinearLayout row = new LinearLayout(BrowserActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setPadding(15, 18, 15, 18);
+                row.setPadding(10, 14, 10, 14);
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setBackgroundColor(Color.parseColor("#1F1F1F"));
+
+                // إضافة Checkbox لتحديد المسارات يدوياً للدمج
+                CheckBox cb = new CheckBox(BrowserActivity.this);
+                cb.setChecked(item.isSelected);
+                cb.setOnCheckedChangeListener((buttonView, isChecked) -> item.isSelected = isChecked);
+                row.addView(cb);
 
                 TextView tvMore = new TextView(BrowserActivity.this);
                 tvMore.setText("⋮");
                 tvMore.setTextColor(Color.WHITE);
-                tvMore.setTextSize(24);
-                tvMore.setPadding(10, 0, 20, 0);
+                tvMore.setTextSize(22);
+                tvMore.setPadding(10, 0, 15, 0);
                 row.addView(tvMore);
 
                 LinearLayout infoLayout = new LinearLayout(BrowserActivity.this);
                 infoLayout.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
-                infoParams.setMargins(10, 0, 15, 0);
+                infoParams.setMargins(5, 0, 10, 0);
                 infoLayout.setLayoutParams(infoParams);
 
                 TextView tvTitle = new TextView(BrowserActivity.this);
                 tvTitle.setText(item.title);
                 tvTitle.setTextColor(Color.WHITE);
-                tvTitle.setTextSize(14);
+                tvTitle.setTextSize(13);
                 tvTitle.setMaxLines(2);
                 tvTitle.setEllipsize(TextUtils.TruncateAt.END);
                 infoLayout.addView(tvTitle);
 
                 TextView tvFormat = new TextView(BrowserActivity.this);
                 tvFormat.setText(item.format);
-                tvFormat.setTextColor(item.isAudio ? Color.parseColor("#FF9800") : Color.parseColor("#4CAF50"));
+                int color = Color.GRAY;
+                if (item.mediaType == 1) color = Color.parseColor("#4CAF50");
+                else if (item.mediaType == 2) color = Color.parseColor("#FF9800");
+                tvFormat.setTextColor(color);
                 tvFormat.setTextSize(12);
                 tvFormat.setPadding(0, 4, 0, 0);
                 infoLayout.addView(tvFormat);
@@ -833,7 +866,7 @@ public class BrowserActivity extends Activity {
                 row.addView(infoLayout);
 
                 ImageView thumb = new ImageView(BrowserActivity.this);
-                LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
+                LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(120, 100);
                 thumb.setLayoutParams(thumbParams);
                 thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
@@ -856,7 +889,23 @@ public class BrowserActivity extends Activity {
             }
         });
 
-        main.addView(listView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 850));
+        main.addView(listView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 800));
+
+        // زر دمج المسارات المحددة يدوياً بالـ Checkbox
+        Button btnMergeSelected = new Button(this);
+        btnMergeSelected.setText("🔗 دمج وبث المسارات المحددة يدوياً (☑)");
+        btnMergeSelected.setTextColor(Color.BLACK);
+        btnMergeSelected.setBackgroundColor(Color.parseColor("#FFD700"));
+        btnMergeSelected.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                castSelectedTracksManually();
+            }
+        });
+        LinearLayout.LayoutParams btnMergeParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnMergeParams.setMargins(0, 12, 0, 8);
+        main.addView(btnMergeSelected, btnMergeParams);
 
         Button btnClear = new Button(this);
         btnClear.setText("مسح القائمة");
@@ -871,11 +920,68 @@ public class BrowserActivity extends Activity {
                 dialog.dismiss();
             }
         });
-        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        btnParams.setMargins(0, 15, 0, 0);
-        main.addView(btnClear, btnParams);
+        main.addView(btnClear, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         return main;
+    }
+
+    // دالة تنفيذ الدمج اليدوي حسب اختيار المستخدم بالـ Checkbox
+    private void castSelectedTracksManually() {
+        String videoTrack = "";
+        String audioTrack = "";
+
+        for (CapturedMedia item : capturedList) {
+            if (item.isSelected) {
+                if (item.mediaType == 1 && videoTrack.isEmpty()) {
+                    videoTrack = item.url;
+                } else if (item.mediaType == 2 && audioTrack.isEmpty()) {
+                    audioTrack = item.url;
+                } else if (videoTrack.isEmpty()) {
+                    videoTrack = item.url;
+                } else if (audioTrack.isEmpty()) {
+                    audioTrack = item.url;
+                }
+            }
+        }
+
+        if (videoTrack.isEmpty()) {
+            Toast.makeText(this, "يرجى تحديد مسار واحد على الأقل بعلامة ☑", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (audioTrack.isEmpty()) {
+            castToTv(videoTrack);
+            return;
+        }
+
+        if (tvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "جاري إرسال المسارين المحددين للشاشة...", Toast.LENGTH_SHORT).show();
+
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) endpoint = "http://" + endpoint;
+            if (!endpoint.contains(":8080")) endpoint += ":8080";
+
+            String fullUrl = endpoint + "/?video=" + URLEncoder.encode(videoTrack, "UTF-8") 
+                                      + "&audio=" + URLEncoder.encode(audioTrack, "UTF-8");
+
+            Request req = new Request.Builder().url(fullUrl).build();
+            client.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تم بدء البث المدمج في الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show());
+                }
+            });
+        } catch (Exception ignored) {}
     }
 
     private void showMediaOptionsDialog(final CapturedMedia media) {
@@ -905,7 +1011,6 @@ public class BrowserActivity extends Activity {
                 .show();
     }
 
-    // دالة الإرسال المدمج للشاشة برابط الصوت ورابط الصورة معاً
     private void mergeAndCastToTv() {
         String videoTrackUrl = "";
         String audioTrackUrl = "";
@@ -1175,4 +1280,4 @@ public class BrowserActivity extends Activity {
             super.onBackPressed();
         }
     }
-}
+                                                  }
