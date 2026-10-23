@@ -70,7 +70,7 @@ public class ShareActivity extends Activity {
             if (sharedText != null) {
                 String extractedUrl = extractUrl(sharedText);
                 if (extractedUrl != null) {
-                    processUrl(extractedUrl);
+                    dispatchPlatformRoute(extractedUrl);
                     return;
                 }
             }
@@ -90,15 +90,26 @@ public class ShareActivity extends Activity {
     private String extractUrl(String text) {
         Pattern pattern = Pattern.compile("(https?://[\\w\\-\\.\\?\\=\\&\\%\\/\\#\\+]+)");
         Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
+        if (matcher.find()) return matcher.group(1);
         return null;
     }
 
-    private void processUrl(String url) {
+    // فرز المنصات: كل منصة تعمل بمسار مستقل تماماً دون تدخل
+    private void dispatchPlatformRoute(String url) {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         targetTvIp = prefs.getString("tv_ip", "").trim();
+
+        String lowerUrl = url.toLowerCase();
+
+        // 1. إنستجرام: يفتح المتصفح فوراً دون قناص
+        if (lowerUrl.contains("instagram.com")) {
+            Intent browserIntent = new Intent(this, BrowserActivity.class);
+            browserIntent.setAction(Intent.ACTION_VIEW);
+            browserIntent.setData(Uri.parse(url));
+            startActivity(browserIntent);
+            finish();
+            return;
+        }
 
         if (targetTvIp.isEmpty()) {
             Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
@@ -106,25 +117,32 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب (مباشر)
-        if (url.contains("youtube.com") || url.contains("youtu.be")) {
+        // 2. يوتيوب: إرسال فوري مباشر
+        if (lowerUrl.contains("youtube.com") || lowerUrl.contains("youtu.be")) {
             sendToTv(targetTvIp, url, false);
             return;
         }
 
-        // 2. تيك توك العادي فقط (الفيديوهات المسجلة)
-        if (url.contains("tiktok.com") && !url.contains("/live") && !url.contains("live.tiktok.com")) {
+        // 3. تيك توك: العادي عبر API السريع
+        if (lowerUrl.contains("tiktok.com") && !lowerUrl.contains("/live") && !lowerUrl.contains("live.tiktok.com")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
-            extractTikTokVideo(url);
+            handleTikTok(url);
             return;
         }
 
-        // 3. ثريدز، تويتر، لايف تيك توك، فيسبوك
-        Toast.makeText(this, "جاري قنص البث للشاشة...", Toast.LENGTH_SHORT).show();
-        startSniffing(url);
+        // 4. ثريدز (Threads): قناص صامت خفيف للشاشة خبط لزق
+        if (lowerUrl.contains("threads.net")) {
+            Toast.makeText(this, "جاري قنص ثريد للشاشة مباشرة...", Toast.LENGTH_SHORT).show();
+            startPlatformSniffer(url, "threads");
+            return;
+        }
+
+        // 5. تويتر (X) وفيسبوك ولايف تيك توك
+        Toast.makeText(this, "جاري قنص الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
+        startPlatformSniffer(url, "generic");
     }
 
-    private void extractTikTokVideo(final String url) {
+    private void handleTikTok(final String url) {
         try {
             String apiUrl = "https://www.tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8");
             Request request = new Request.Builder().url(apiUrl).build();
@@ -132,7 +150,7 @@ public class ShareActivity extends Activity {
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    mainHandler.post(() -> startSniffing(url));
+                    mainHandler.post(() -> startPlatformSniffer(url, "generic"));
                 }
 
                 @Override
@@ -150,16 +168,16 @@ public class ShareActivity extends Activity {
                             }
                         }
                     } catch (Exception ignored) {}
-                    mainHandler.post(() -> startSniffing(url));
+                    mainHandler.post(() -> startPlatformSniffer(url, "generic"));
                 }
             });
         } catch (Exception e) {
-            startSniffing(url);
+            startPlatformSniffer(url, "generic");
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private void startSniffing(String url) {
+    private void startPlatformSniffer(String url, final String platformType) {
         isCaptured = false;
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
@@ -168,13 +186,13 @@ public class ShareActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        // User-Agent الخفيف الأصلي اللي ثريدز وتيك توك بيقبلوه بدون حظر
+        // User-Agent الأصلي الخفيف المعتمد
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onMediaFound(String mediaUrl) {
-                checkAndSendMedia(mediaUrl);
+                checkAndSendMedia(mediaUrl, platformType);
             }
         }, "MediaSniffer");
 
@@ -182,7 +200,7 @@ public class ShareActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString();
-                checkAndSendMedia(reqUrl);
+                checkAndSendMedia(reqUrl, platformType);
                 return super.shouldInterceptRequest(view, request);
             }
 
@@ -210,38 +228,42 @@ public class ShareActivity extends Activity {
 
         mainHandler.postDelayed(() -> {
             if (!isCaptured) {
-                Toast.makeText(ShareActivity.this, "تعذر قنص البث تلقائياً، جرب فتحه بالمتصفح", Toast.LENGTH_SHORT).show();
+                Toast.makeText(ShareActivity.this, "تعذر القنص المباشر، جرب فتحه بالمتصفح", Toast.LENGTH_SHORT).show();
                 destroyWebView();
                 finish();
             }
-        }, 18000);
+        }, 16000);
     }
 
-    private synchronized void checkAndSendMedia(String reqUrl) {
+    private synchronized void checkAndSendMedia(String reqUrl, String platformType) {
         if (isCaptured || reqUrl == null || reqUrl.isEmpty()) return;
 
         String lower = reqUrl.toLowerCase();
 
-        // استبعاد الملفات التافهة والصور
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
                 lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
                 lower.contains("preview") || lower.contains(".ico")) {
             return;
         }
 
-        // 1. قنص لايف تيك توك الصريح (مثل الذي استخرجه Web Video Caster)
-        boolean isTikTokLive = (lower.contains("pull-") && lower.contains("tiktokcdn.com")) ||
-                               (lower.contains("tiktokcdn.com") && (lower.contains(".flv") || lower.contains(".m3u8")));
+        boolean matched = false;
 
-        // 2. قنص فيديوهات ثريدز وتويتر وفيسبوك
-        boolean isDirectMedia = lower.contains(".mp4") ||
-                                lower.contains(".m3u8") ||
-                                lower.contains("video_playback") ||
-                                lower.contains("&mime=video") ||
-                                (lower.contains("cdninstagram.com") && lower.contains("/v/")) ||
-                                (lower.contains("threads.net") && lower.contains("video"));
+        // مسار خاص لثريدز: قنص رابط MP4 الصافي
+        if ("threads".equals(platformType)) {
+            if (lower.contains(".mp4") || lower.contains("video_playback") || (lower.contains("cdninstagram.com") && lower.contains("/v/"))) {
+                matched = true;
+            }
+        } else {
+            // المسار العام للفيسبوك وتويتر وبثوث لايف تيك توك
+            if ((lower.contains("pull-") && lower.contains("tiktokcdn.com")) ||
+                (lower.contains("tiktokcdn.com") && (lower.contains(".flv") || lower.contains(".m3u8"))) ||
+                lower.contains(".mp4") || lower.contains(".m3u8") ||
+                lower.contains("video_playback") || lower.contains("&mime=video")) {
+                matched = true;
+            }
+        }
 
-        if (isTikTokLive || isDirectMedia) {
+        if (matched) {
             isCaptured = true;
             mainHandler.post(() -> {
                 sendToTv(targetTvIp, reqUrl, false);
