@@ -98,28 +98,32 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب (مباشر للشاشة دون أي تعديل)
+        // 1. يوتيوب (كما هو تماماً بدون لمس)
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. تيك توك العادي عبر API tikwm الخارق (دون أي تعديل)
+        // 2. تيك توك العادي (كما هو تماماً بدون لمس)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. إنستجرام وثريدز (استخراج الرابط المدمج بصوت وصورة)
-        if (url.contains("instagram.com") || url.contains("threads.net")) {
-            Toast.makeText(this, "جاري استخراج فيديو بصوت وصورة...", Toast.LENGTH_SHORT).show();
-            extractInstagramAndThreads(url);
+        // 3. إنستجرام: استخراج الفيديو مع الصوت معاً مدمجين
+        if (url.contains("instagram.com")) {
+            Toast.makeText(this, "جاري استخراج ريل إنستجرام بصوت وصورة...", Toast.LENGTH_SHORT).show();
+            extractInstagramCombined(url);
             return;
         }
 
-        // 4. تويتر، فيسبوك، ولايف تيك توك عبر القناص التلقائي
-        Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
+        // 4. لايف تيك توك، تويتر، فيسبوك، وثريدز: القناص المباشر
+        if (url.contains("/live")) {
+            Toast.makeText(this, "جاري قنص بث تيك توك المباشر...", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
+        }
         startSniffing(url);
     }
 
@@ -157,9 +161,9 @@ public class ShareActivity extends Activity {
         }
     }
 
-    private void extractInstagramAndThreads(final String originalUrl) {
+    // استخراج إنستجرام برابط مدمج الصوت والصورة
+    private void extractInstagramCombined(final String originalUrl) {
         try {
-            // استخدام واجهة عامة لدمج واستخراج مسار الفيديو مع الصوت معاً
             String cleanUrl = originalUrl.split("\\?")[0];
             String endpoint = "https://api.cobalt.tools/api/json";
 
@@ -191,7 +195,6 @@ public class ShareActivity extends Activity {
                             String respData = response.body().string();
                             JSONObject json = new JSONObject(respData);
 
-                            // رابط الفيديو المباشر المدمج بصوته
                             String streamUrl = json.optString("url");
                             if (streamUrl.isEmpty() && json.has("picker")) {
                                 JSONArray picker = json.getJSONArray("picker");
@@ -206,7 +209,6 @@ public class ShareActivity extends Activity {
                             }
                         }
                     } catch (Exception ignored) {}
-                    // إذا تعذر الاستخراج نعود فوراً للقناص
                     mainHandler.post(() -> startSniffing(originalUrl));
                 }
             });
@@ -225,6 +227,7 @@ public class ShareActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
+        // تخصيص User-Agent للموبايل لفتح خوادم البث المباشر
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
@@ -245,6 +248,7 @@ public class ShareActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
+                // محاكاة النقر التلقائي لتشغيل البث الحي والتقاط تدفق الفيديو
                 String js = "(function() { " +
                         "   var vids = document.getElementsByTagName('video'); " +
                         "   for (var i = 0; i < vids.length; i++) { " +
@@ -252,6 +256,12 @@ public class ShareActivity extends Activity {
                         "       var src = vids[i].currentSrc || vids[i].src; " +
                         "       if (src && src.startsWith('http')) { " +
                         "           window.MediaSniffer.onMediaFound(src); " +
+                        "       } " +
+                        "   } " +
+                        "   var btns = document.querySelectorAll('button, div'); " +
+                        "   for (var j=0; j<btns.length; j++) { " +
+                        "       if (btns[j].innerText && (btns[j].innerText.includes('Play') || btns[j].innerText.includes('تشغيل') || btns[j].innerText.includes('Watch'))) { " +
+                        "           btns[j].click(); " +
                         "       } " +
                         "   } " +
                         "})();";
@@ -273,31 +283,38 @@ public class ShareActivity extends Activity {
     private synchronized void checkAndSendMedia(String reqUrl) {
         if (isCaptured || reqUrl == null || reqUrl.isEmpty()) return;
 
-        String lower = reqUrl.toLowerCase();
+        // تنظيف الرابط من التجزئة إن وجدت
+        String cleanUrl = reqUrl;
+        if (cleanUrl.contains("&bytestart=")) {
+            cleanUrl = cleanUrl.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
+        }
 
-        // 1. استبعاد ملفات الصور والنظام
+        String lower = cleanUrl.toLowerCase();
+
+        // 1. استبعاد ملفات الصور والتتبعات
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
             lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
             lower.contains("preview")) {
             return;
         }
 
-        // 2. قنص البث الحي (HLS / تيك توك لايف FLV)
+        // 2. قنص البث الحي (HLS / لايف تيك توك FLV)
         boolean isLiveStream = lower.contains(".m3u8") ||
                                lower.contains(".flv") ||
                                lower.contains("pull-flv") ||
                                lower.contains("pull-hls") ||
                                lower.contains("live-hls");
 
-        // 3. قنص الفيديوهات الصريحة (تويتر، ثريدز، فيسبوك، إنستجرام)
-        boolean isDirectVideo = (lower.contains(".mp4") && !lower.contains("bytestart=")) ||
+        // 3. قنص الفيديوهات الصريحة (تويتر، ثريدز، فيسبوك)
+        boolean isDirectVideo = lower.contains(".mp4") ||
                                 lower.contains("video_playback") ||
                                 lower.contains("&mime=video");
 
         if (isLiveStream || isDirectVideo) {
             isCaptured = true;
+            final String finalMedia = cleanUrl;
             mainHandler.post(() -> {
-                sendToTv(targetTvIp, reqUrl);
+                sendToTv(targetTvIp, finalMedia);
                 destroyWebView();
             });
         }
