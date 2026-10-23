@@ -264,7 +264,6 @@ public class BrowserActivity extends Activity {
 
         setContentView(rootLayout);
 
-        // هنا التعديل: قراءة الرابط القادم من ShareActivity أو من أي رابط خارجي
         String startUrl = "about:home";
         if (getIntent() != null) {
             if (getIntent().getStringExtra("url") != null) {
@@ -424,35 +423,36 @@ public class BrowserActivity extends Activity {
                     }
                 }
 
-                boolean isJunkChunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
-                                      lowerUrl.contains("bytestart=") || lowerUrl.contains("adformat") ||
-                                      lowerUrl.contains("init-") || lowerUrl.contains("/dash/") ||
-                                      lowerUrl.contains("preview");
+                // فلترة الملفات غير المرغوبة بدون استبعاد مسارات DASH الخاصة بإنستجرام
+                boolean isJunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
+                                 lowerUrl.contains(".js") || lowerUrl.contains(".css") ||
+                                 lowerUrl.contains("preview") || lowerUrl.contains("rsrc.php");
 
-                if (!isJunkChunk) {
-                    if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-") || 
-                        lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u") ||
-                        lowerUrl.contains("mime=video")) {
+                if (!isJunk) {
+                    // التقاط الفيديو الصريح أو مسار إنستجرام وفك التجزئة
+                    if (lowerUrl.contains(".mp4") || lowerUrl.contains(".flv") || 
+                        lowerUrl.contains("pull-") || lowerUrl.contains(".m3u8") || 
+                        lowerUrl.contains("mime=video") || lowerUrl.contains("fbcdn.net")) {
                         
+                        // تنظيف الرابط من التجزئة ليعمل كملف كامل
+                        String cleanMedia = reqUrl;
+                        if (cleanMedia.contains("&bytestart=")) {
+                            cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
+                        }
+
                         String format = "-mp4";
                         if (lowerUrl.contains(".flv") || lowerUrl.contains("pull-")) format = "-flv";
-                        else if (lowerUrl.contains(".m3u8") || lowerUrl.contains(".m3u")) format = "-m3u8";
+                        else if (lowerUrl.contains(".m3u8")) format = "-m3u8";
 
                         String cleanName = "فيديو مباشر";
                         try {
                             String pageTitle = view.getTitle();
                             if (pageTitle != null && !pageTitle.isEmpty() && !pageTitle.contains("http")) {
                                 cleanName = pageTitle;
-                            } else {
-                                Uri uri = Uri.parse(reqUrl);
-                                String lastSeg = uri.getLastPathSegment();
-                                if (lastSeg != null && lastSeg.length() > 3) {
-                                    cleanName = lastSeg.replace(".mp4", "").replace(".m3u8", "").replace(".flv", "");
-                                }
                             }
                         } catch (Exception ignored) {}
 
-                        addCapturedMedia(reqUrl, cleanName, format, null);
+                        addCapturedMedia(cleanMedia, cleanName, format, null);
                     }
                 }
 
@@ -467,20 +467,8 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
+                // سكريبت صائد الميديا النشط وسحب البوستر وعنوان الميتا
                 String js = "javascript:(function(){" +
-                        "try{" +
-                        "  var egyptPos = { coords: { latitude: 30.0444, longitude: 31.2357, accuracy: 15, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() };" +
-                        "  navigator.geolocation.getCurrentPosition = function(s){ s(egyptPos); };" +
-                        "  navigator.geolocation.watchPosition = function(s){ s(egyptPos); return 1; };" +
-                        "  if(navigator.permissions && navigator.permissions.query){" +
-                        "    navigator.permissions.query = function(q){ return Promise.resolve({ state: q.name === 'geolocation' ? 'granted' : 'denied' }); };" +
-                        "  }" +
-                        "}catch(e){}" +
-                        "try{" +
-                        "  Object.defineProperty(document, 'hidden', { get: function(){ return false; }, configurable: true });" +
-                        "  Object.defineProperty(document, 'visibilityState', { get: function(){ return 'visible'; }, configurable: true });" +
-                        "  document.addEventListener('visibilitychange', function(e){ e.stopImmediatePropagation(); }, true);" +
-                        "}catch(e){}" +
                         "try{" +
                         "  var origPlay = HTMLMediaElement.prototype.play;" +
                         "  HTMLMediaElement.prototype.play = function(){" +
@@ -495,16 +483,6 @@ public class BrowserActivity extends Activity {
                         "    return origPlay.apply(this, arguments);" +
                         "  };" +
                         "}catch(e){}" +
-                        "function fastSkipYtAds(){" +
-                        "  var ad = document.querySelector('.ad-showing, .ad-interrupting');" +
-                        "  if(ad){" +
-                        "    var v = document.querySelector('video');" +
-                        "    if(v && !isNaN(v.duration)){ v.currentTime = v.duration; }" +
-                        "  }" +
-                        "  var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern');" +
-                        "  if(skipBtn){ skipBtn.click(); }" +
-                        "}" +
-                        "setInterval(fastSkipYtAds, 300);" +
                         "})()";
                 view.loadUrl(js);
             }
@@ -526,10 +504,14 @@ public class BrowserActivity extends Activity {
         @JavascriptInterface
         public void onVideoPlayingWithPoster(String mediaUrl, String title, String posterUrl) {
             if (mediaUrl != null && !mediaUrl.isEmpty() && mediaUrl.startsWith("http")) {
+                String cleanMedia = mediaUrl;
+                if (cleanMedia.contains("&bytestart=")) {
+                    cleanMedia = cleanMedia.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
+                }
                 String format = "-mp4";
-                if (mediaUrl.contains(".flv") || mediaUrl.contains("pull-")) format = "-flv";
-                else if (mediaUrl.contains(".m3u8")) format = "-m3u8";
-                addCapturedMedia(mediaUrl, title, format, posterUrl);
+                if (cleanMedia.contains(".flv") || cleanMedia.contains("pull-")) format = "-flv";
+                else if (cleanMedia.contains(".m3u8")) format = "-m3u8";
+                addCapturedMedia(cleanMedia, title, format, posterUrl);
             }
         }
 
@@ -638,9 +620,6 @@ public class BrowserActivity extends Activity {
 
         Map<String, String> extraHeaders = new HashMap<String, String>();
         extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
-        extraHeaders.put("X-Forwarded-For", "156.210.12.1");
-        extraHeaders.put("Client-IP", "156.210.12.1");
-        extraHeaders.put("X-Real-IP", "156.210.12.1");
 
         current.loadUrl(target, extraHeaders);
     }
@@ -721,7 +700,12 @@ public class BrowserActivity extends Activity {
             return;
         }
 
+        // سكريبت متقدم لفحص مصادر الفيديو وأيضاً وسم الميتا المباشر الخاص بإنستجرام
         String js = "javascript:(function(){" +
+                "var meta = document.querySelector('meta[property=\"og:video\"], meta[property=\"og:video:secure_url\"]');" +
+                "if(meta && meta.content){" +
+                "  window.AboEzzatBridge.onVideoPlayingWithPoster(meta.content, document.title || 'ريل إنستجرام', '');" +
+                "}" +
                 "var vids = document.getElementsByTagName('video');" +
                 "for(var i=0; i<vids.length; i++){" +
                 "  var src = vids[i].currentSrc || vids[i].src;" +
@@ -730,13 +714,8 @@ public class BrowserActivity extends Activity {
                 "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
                 "    if(metaImg){ poster = metaImg.content; }" +
                 "  }" +
-                "  if(!src || src.indexOf('blob:') === 0){" +
-                "    var s = vids[i].getElementsByTagName('source');" +
-                "    if(s.length > 0){ src = s[0].src; }" +
-                "  }" +
                 "  if(src && src.indexOf('http') === 0){" +
-                "    var title = document.title || 'مقطع فيديو';" +
-                "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, title, poster);" +
+                "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, document.title || 'مقطع فيديو', poster);" +
                 "  }" +
                 "}" +
                 "})()";
