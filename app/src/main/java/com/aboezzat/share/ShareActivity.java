@@ -35,8 +35,8 @@ import org.json.JSONObject;
 public class ShareActivity extends Activity {
 
     private final OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -96,27 +96,30 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب (ثابت وشغال 100%)
+        // 1. يوتيوب (كما هو)
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. تيك توك العادي (ثابت وشغال 100% عبر tikwm)
+        // 2. تيك توك العادي (كما هو عبر tikwm)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. إنستجرام: تنظيف الرابط وفك الصوت والصورة عبر صفحة الـ Embed المدمجة
+        // 3. إنستجرام فقط: فتح المتصفح التفاعلي لرؤية الصفحة والتفاعل معها
         if (url.contains("instagram.com")) {
-            Toast.makeText(this, "جاري استخراج ريل إنستجرام بصوت وصورة...", Toast.LENGTH_SHORT).show();
-            processInstagramUrl(url);
+            Toast.makeText(this, "جاري فتح إنستجرام في المتصفح...", Toast.LENGTH_SHORT).show();
+            Intent browserIntent = new Intent(this, BrowserActivity.class);
+            browserIntent.putExtra("url", url);
+            startActivity(browserIntent);
+            finish();
             return;
         }
 
-        // 4. تويتر، فيسبوك، وثريدز: القناص المباشر الشغال ممتاز
+        // 4. تويتر، فيسبوك، ثريدز، ولايف تيك توك (القناص الصامت الأصلي كما هو)
         Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
         startSniffing(url);
     }
@@ -155,82 +158,6 @@ public class ShareActivity extends Activity {
         }
     }
 
-    private void processInstagramUrl(String rawUrl) {
-        // استخراج كود المنشور أو الريل لتحويله لرابط Embed موحد
-        Pattern pattern = Pattern.compile("instagram\\.com/(?:reel|reels|p)/([a-zA-Z0-9_-]+)");
-        Matcher matcher = pattern.matcher(rawUrl);
-        String targetEmbedUrl = rawUrl.split("\\?")[0];
-
-        if (matcher.find()) {
-            String shortCode = matcher.group(1);
-            targetEmbedUrl = "https://www.instagram.com/p/" + shortCode + "/embed/captioned/";
-        }
-
-        startInstagramSniffing(targetEmbedUrl, rawUrl);
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private void startInstagramSniffing(String embedUrl, String fallbackUrl) {
-        isCaptured = false;
-        webView = new WebView(this);
-        rootLayout.addView(webView, new FrameLayout.LayoutParams(1, 1)); // ربط بالواجهة لمنع تجميد النظام له
-
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
-
-        webView.addJavascriptInterface(new Object() {
-            @JavascriptInterface
-            public void onMediaFound(String mediaUrl) {
-                checkAndSendMedia(mediaUrl);
-            }
-        }, "MediaSniffer");
-
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                String reqUrl = request.getUrl().toString();
-                checkAndSendMedia(reqUrl);
-                return super.shouldInterceptRequest(view, request);
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String loadedUrl) {
-                super.onPageFinished(view, loadedUrl);
-                // محاكاة النقر على تشغيل وتخطي نوافذ المتابعة
-                String js = "(function() { " +
-                        "   var btns = document.querySelectorAll('button, div, a'); " +
-                        "   for (var j=0; j<btns.length; j++) { " +
-                        "       var txt = btns[j].innerText || ''; " +
-                        "       if (txt.includes('ليس الآن') || txt.includes('Not Now') || txt.includes('Play')) { " +
-                        "           btns[j].click(); " +
-                        "       } " +
-                        "   } " +
-                        "   var vids = document.getElementsByTagName('video'); " +
-                        "   for (var i = 0; i < vids.length; i++) { " +
-                        "       try { vids[i].play(); } catch(e){} " +
-                        "       var src = vids[i].currentSrc || vids[i].src; " +
-                        "       if (src && src.startsWith('http')) { " +
-                        "           window.MediaSniffer.onMediaFound(src); " +
-                        "       } " +
-                        "   } " +
-                        "})();";
-                view.evaluateJavascript(js, null);
-            }
-        });
-
-        webView.loadUrl(embedUrl);
-
-        mainHandler.postDelayed(() -> {
-            if (!isCaptured) {
-                destroyWebView();
-                startSniffing(fallbackUrl.split("\\?")[0]);
-            }
-        }, 10000);
-    }
-
     @SuppressLint("SetJavaScriptEnabled")
     private void startSniffing(String url) {
         isCaptured = false;
@@ -240,6 +167,7 @@ public class ShareActivity extends Activity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
@@ -289,13 +217,7 @@ public class ShareActivity extends Activity {
     private synchronized void checkAndSendMedia(String reqUrl) {
         if (isCaptured || reqUrl == null || reqUrl.isEmpty()) return;
 
-        // تنظيف الرابط من معاملات التجزئة
-        String cleanUrl = reqUrl;
-        if (cleanUrl.contains("&bytestart=")) {
-            cleanUrl = cleanUrl.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
-        }
-
-        String lower = cleanUrl.toLowerCase();
+        String lower = reqUrl.toLowerCase();
 
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
             lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
@@ -303,24 +225,20 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // استبعاد مسارات الصوت المنفصلة لضمان التقاط ملف الفيديو المدمج
-        boolean isAudioOnly = lower.contains("audio") || lower.contains("dash_ln_heaac");
-
         boolean isLiveStream = lower.contains(".m3u8") ||
                                lower.contains(".flv") ||
                                lower.contains("pull-flv") ||
                                lower.contains("pull-hls") ||
                                lower.contains("live-hls");
 
-        boolean isDirectVideo = (lower.contains(".mp4") && !isAudioOnly) ||
+        boolean isDirectVideo = (lower.contains(".mp4") && !lower.contains("bytestart=")) ||
                                 lower.contains("video_playback") ||
                                 lower.contains("&mime=video");
 
         if (isLiveStream || isDirectVideo) {
             isCaptured = true;
-            final String finalMedia = cleanUrl;
             mainHandler.post(() -> {
-                sendToTv(targetTvIp, finalMedia);
+                sendToTv(targetTvIp, reqUrl);
                 destroyWebView();
             });
         }
