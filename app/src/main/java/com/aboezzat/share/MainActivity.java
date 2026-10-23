@@ -49,13 +49,20 @@ public class MainActivity extends Activity {
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
 
+    // طابور الصور المتتابعة
     private final List<Uri> slideshowQueue = new ArrayList<>();
     private int currentSlideIndex = 0;
+    private boolean isSlideshowRunning = false;
+
+    // طابور الفيديوهات المتعددة
+    private final List<Uri> videoQueue = new ArrayList<>();
+    private int currentVideoIndex = 0;
+
     private final Handler slideHandler = new Handler(Looper.getMainLooper());
     private final Runnable slideRunnable = new Runnable() {
         @Override
         public void run() {
-            if (!slideshowQueue.isEmpty()) {
+            if (!slideshowQueue.isEmpty() && isSlideshowRunning) {
                 currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
                 selectedMediaUri = slideshowQueue.get(currentSlideIndex);
                 castLocalMediaToTv(false);
@@ -107,14 +114,56 @@ public class MainActivity extends Activity {
         findViewById(R.id.card_local_media).setOnClickListener(v -> openMediaPicker(false));
         findViewById(R.id.card_slideshow).setOnClickListener(v -> openMediaPicker(true));
 
-        // التحكم بالتشغيل والتقديم/التأخير
-        findViewById(R.id.btn_play_pause).setOnClickListener(v -> sendRemoteCommand("toggle_play"));
-        findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rewind"));
-        findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("forward"));
+        // زر التشغيل والإيقاف المؤقت المزدوج
+        findViewById(R.id.btn_play_pause).setOnClickListener(v -> {
+            if (!slideshowQueue.isEmpty()) {
+                if (isSlideshowRunning) {
+                    isSlideshowRunning = false;
+                    slideHandler.removeCallbacks(slideRunnable);
+                    Toast.makeText(this, "تم إيقاف عرض الصور مؤقتاً ⏸️", Toast.LENGTH_SHORT).show();
+                } else {
+                    isSlideshowRunning = true;
+                    slideHandler.post(slideRunnable);
+                    Toast.makeText(this, "استئناف عرض الصور ▶️", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                sendRemoteCommand("play_pause");
+            }
+        });
 
-        // أزرار التالي والسابق الجديدة
-        findViewById(R.id.btn_next).setOnClickListener(v -> sendRemoteCommand("next"));
-        findViewById(R.id.btn_prev).setOnClickListener(v -> sendRemoteCommand("prev"));
+        // التقديم والتأخير 10 ثواني
+        findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rw"));
+        findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("ff"));
+
+        // زر التالي الذكي (يدعم الصور المتتابعة وفيديوهات الطابور والشاشة)
+        findViewById(R.id.btn_next).setOnClickListener(v -> {
+            if (!slideshowQueue.isEmpty()) {
+                currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
+                selectedMediaUri = slideshowQueue.get(currentSlideIndex);
+                castLocalMediaToTv(false);
+            } else if (videoQueue.size() > 1 && currentVideoIndex < videoQueue.size() - 1) {
+                currentVideoIndex++;
+                selectedMediaUri = videoQueue.get(currentVideoIndex);
+                castLocalMediaToTv(true);
+            } else {
+                sendRemoteCommand("next");
+            }
+        });
+
+        // زر السابق الذكي
+        findViewById(R.id.btn_prev).setOnClickListener(v -> {
+            if (!slideshowQueue.isEmpty()) {
+                currentSlideIndex = (currentSlideIndex - 1 + slideshowQueue.size()) % slideshowQueue.size();
+                selectedMediaUri = slideshowQueue.get(currentSlideIndex);
+                castLocalMediaToTv(false);
+            } else if (videoQueue.size() > 1 && currentVideoIndex > 0) {
+                currentVideoIndex--;
+                selectedMediaUri = videoQueue.get(currentVideoIndex);
+                castLocalMediaToTv(true);
+            } else {
+                sendRemoteCommand("prev");
+            }
+        });
 
         // أزرار التحكم بالصوت
         findViewById(R.id.btn_vol_up).setOnClickListener(v -> sendRemoteCommand("vol_up"));
@@ -189,7 +238,6 @@ public class MainActivity extends Activity {
     private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
 
-        // فيسبوك وإنستجرام فقط يحتاجان دخول المتصفح للاستخراج
         boolean isBrowserRequired = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
                                     lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com");
 
@@ -200,7 +248,6 @@ public class MainActivity extends Activity {
             startActivity(browserIntent);
             finish();
         } else {
-            // ثريدز (threads.net)، يوتيوب، تيك توك، تويتر/X تذهب مباشرة للشاشة فوراً
             castUrlDirectlyToTv(url);
         }
     }
@@ -241,18 +288,19 @@ public class MainActivity extends Activity {
         }
     }
 
+    // تمكين اختيار عدة فيديوهات أو صور
     private void openMediaPicker(boolean multipleImages) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); // تفعيل التحديد المتعدد
 
         if (multipleImages) {
             intent.setType("image/*");
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             startActivityForResult(intent, PICK_SLIDESHOW_REQUEST);
         } else {
             intent.setType("*/*");
-            String[] mimeTypes = {"video/*", "image/*", "audio/*"};
+            String[] mimeTypes = {"video/*", "audio/*"};
             intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
             startActivityForResult(intent, PICK_MEDIA_REQUEST);
         }
@@ -262,15 +310,38 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         slideHandler.removeCallbacks(slideRunnable);
+        isSlideshowRunning = false;
 
         if (resultCode == RESULT_OK && data != null) {
-            if (requestCode == PICK_MEDIA_REQUEST && data.getData() != null) {
-                selectedMediaUri = data.getData();
-                takePermissions(selectedMediaUri);
-                castLocalMediaToTv(true);
-            } else if (requestCode == PICK_SLIDESHOW_REQUEST) {
+            if (requestCode == PICK_MEDIA_REQUEST) {
+                videoQueue.clear();
                 slideshowQueue.clear();
                 ClipData clipData = data.getClipData();
+
+                if (clipData != null) {
+                    for (int i = 0; i < clipData.getItemCount(); i++) {
+                        Uri uri = clipData.getItemAt(i).getUri();
+                        takePermissions(uri);
+                        videoQueue.add(uri);
+                    }
+                } else if (data.getData() != null) {
+                    takePermissions(data.getData());
+                    videoQueue.add(data.getData());
+                }
+
+                if (!videoQueue.isEmpty()) {
+                    currentVideoIndex = 0;
+                    selectedMediaUri = videoQueue.get(0);
+                    castLocalMediaToTv(true);
+                    if (videoQueue.size() > 1) {
+                        Toast.makeText(this, "تم تحميل (" + videoQueue.size() + ") وسائط، استخدم التالي والسابق للتنقل", Toast.LENGTH_LONG).show();
+                    }
+                }
+            } else if (requestCode == PICK_SLIDESHOW_REQUEST) {
+                videoQueue.clear();
+                slideshowQueue.clear();
+                ClipData clipData = data.getClipData();
+
                 if (clipData != null) {
                     for (int i = 0; i < clipData.getItemCount(); i++) {
                         Uri uri = clipData.getItemAt(i).getUri();
@@ -287,6 +358,7 @@ public class MainActivity extends Activity {
                     selectedMediaUri = slideshowQueue.get(0);
                     castLocalMediaToTv(true);
                     if (slideshowQueue.size() > 1) {
+                        isSlideshowRunning = true;
                         slideHandler.postDelayed(slideRunnable, 5000);
                         Toast.makeText(this, "بدأ العرض التقديمي للصور (" + slideshowQueue.size() + ")", Toast.LENGTH_SHORT).show();
                     }
