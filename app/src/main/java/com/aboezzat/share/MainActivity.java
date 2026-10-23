@@ -1,26 +1,27 @@
 package com.aboezzat.share;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetFileDescriptor;
-import android.graphics.Color;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.format.Formatter;
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -35,15 +36,35 @@ import okhttp3.Response;
 public class MainActivity extends Activity {
 
     private static final int PICK_MEDIA_REQUEST = 101;
+    private static final int PICK_SLIDESHOW_REQUEST = 102;
+
     private EditText etTvIp;
+    private TextView tvStatusBadge;
     private SharedPreferences prefs;
     private final OkHttpClient client = new OkHttpClient();
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
 
+    // دعم تشغيل ألبوم الصور المتتابع (Slideshow)
+    private final List<Uri> slideshowQueue = new ArrayList<>();
+    private int currentSlideIndex = 0;
+    private final Handler slideHandler = new Handler(Looper.getMainLooper());
+    private final Runnable slideRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!slideshowQueue.isEmpty()) {
+                currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
+                selectedMediaUri = slideshowQueue.get(currentSlideIndex);
+                castLocalMediaToTv(false);
+                slideHandler.postDelayed(this, 5000); // تغيير كل 5 ثوانٍ
+            }
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         startLocalServer();
@@ -52,7 +73,39 @@ public class MainActivity extends Activity {
             return;
         }
 
-        buildMainUi();
+        initViews();
+    }
+
+    private void initViews() {
+        etTvIp = findViewById(R.id.et_ip);
+        tvStatusBadge = findViewById(R.id.tv_status_badge);
+        Button btnSave = findViewById(R.id.btn_save);
+
+        String savedIp = prefs.getString("tv_ip", "");
+        etTvIp.setText(savedIp);
+        if (!savedIp.isEmpty()) {
+            tvStatusBadge.setText("● متصل: " + savedIp);
+        }
+
+        btnSave.setOnClickListener(v -> {
+            String ip = etTvIp.getText().toString().trim();
+            prefs.edit().putString("tv_ip", ip).apply();
+            tvStatusBadge.setText("● تم الحفظ");
+            Toast.makeText(MainActivity.this, "تم حفظ IP الشاشة ✓", Toast.LENGTH_SHORT).show();
+        });
+
+        findViewById(R.id.card_browser).setOnClickListener(v -> {
+            Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+            startActivity(intent);
+        });
+
+        findViewById(R.id.card_local_media).setOnClickListener(v -> openMediaPicker(false));
+
+        findViewById(R.id.card_slideshow).setOnClickListener(v -> openMediaPicker(true));
+
+        findViewById(R.id.btn_play_pause).setOnClickListener(v -> sendRemoteCommand("toggle_play"));
+        findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rewind"));
+        findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("forward"));
     }
 
     @Override
@@ -71,8 +124,7 @@ public class MainActivity extends Activity {
                 Pattern pattern = Pattern.compile("https?://\\S+");
                 Matcher matcher = pattern.matcher(sharedText);
                 if (matcher.find()) {
-                    String extractedUrl = matcher.group(0);
-                    processSharedLink(extractedUrl);
+                    processSharedLink(matcher.group(0));
                     return true;
                 }
             }
@@ -82,16 +134,17 @@ public class MainActivity extends Activity {
 
     private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
-
-        // فقط فيسبوك وإنستجرام ولايف تيك توك تذهب للمتصفح
         boolean isComplexSite = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
                                 lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com") || 
                                 lowerUrl.contains("/live");
 
         if (isComplexSite) {
-            openInBrowser(url);
+            Intent browserIntent = new Intent(this, BrowserActivity.class);
+            browserIntent.setAction(Intent.ACTION_VIEW);
+            browserIntent.setData(Uri.parse(url));
+            startActivity(browserIntent);
+            finish();
         } else {
-            // يوتيوب، تويتر (X و t.co)، ثريدز (threads.net)، وتيك توك العادي تبث للشاشة فوراً خبط لزق
             castUrlDirectlyToTv(url);
         }
     }
@@ -99,160 +152,88 @@ public class MainActivity extends Activity {
     private void castUrlDirectlyToTv(String mediaUrl) {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً في التطبيق", Toast.LENGTH_LONG).show();
-            buildMainUi();
+            Toast.makeText(this, "يرجى تعيين عنوان الشاشة أولاً", Toast.LENGTH_LONG).show();
             return;
         }
 
         try {
             String endpoint = tvIp;
-            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
-                endpoint = "http://" + endpoint;
-            }
-            if (!endpoint.contains(":8080")) {
-                endpoint = endpoint + ":8080";
-            }
+            if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
+            if (!endpoint.contains(":8080")) endpoint += ":8080";
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة: تأكد من تشغيلها وتوصيل الشبكة", Toast.LENGTH_LONG).show();
-                            finish();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show());
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل على الشاشة فوراً ✓", Toast.LENGTH_SHORT).show();
-                            finish();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "تم الإرسال والتشغيل فوراً ✓", Toast.LENGTH_SHORT).show());
                 }
             });
-        } catch (Exception e) {
-            Toast.makeText(this, "خطأ في معالجة الرابط", Toast.LENGTH_SHORT).show();
-            finish();
-        }
+        } catch (Exception ignored) {}
     }
 
-    private void openInBrowser(String url) {
-        Intent browserIntent = new Intent(this, BrowserActivity.class);
-        browserIntent.setAction(Intent.ACTION_VIEW);
-        browserIntent.setData(Uri.parse(url));
-        startActivity(browserIntent);
-        finish();
-    }
-
-    private void buildMainUi() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(40, 60, 40, 40);
-        layout.setGravity(Gravity.CENTER_HORIZONTAL);
-        layout.setBackgroundColor(Color.parseColor("#121212"));
-
-        TextView tvTitle = new TextView(this);
-        tvTitle.setText("Abo Ezzat Share");
-        tvTitle.setTextSize(26);
-        tvTitle.setTextColor(Color.parseColor("#00B0FF"));
-        tvTitle.setPadding(0, 0, 0, 40);
-        layout.addView(tvTitle);
-
-        etTvIp = new EditText(this);
-        etTvIp.setHint("اكتب عنوان IP الشاشة (مثلاً: 192.168.1.5)");
-        etTvIp.setHintTextColor(Color.GRAY);
-        etTvIp.setTextColor(Color.WHITE);
-        etTvIp.setBackgroundColor(Color.parseColor("#1E1E1E"));
-        etTvIp.setPadding(30, 30, 30, 30);
-        etTvIp.setText(prefs.getString("tv_ip", ""));
-        layout.addView(etTvIp, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button btnSaveIp = new Button(this);
-        btnSaveIp.setText("حفظ عنوان IP الشاشة ✓");
-        btnSaveIp.setBackgroundColor(Color.parseColor("#00897B"));
-        btnSaveIp.setTextColor(Color.WHITE);
-        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        btnParams.setMargins(0, 20, 0, 30);
-        btnSaveIp.setLayoutParams(btnParams);
-        btnSaveIp.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String ip = etTvIp.getText().toString().trim();
-                prefs.edit().putString("tv_ip", ip).apply();
-                Toast.makeText(MainActivity.this, "تم حفظ الـ IP بنجاح", Toast.LENGTH_SHORT).show();
-            }
-        });
-        layout.addView(btnSaveIp);
-
-        Button btnBrowser = new Button(this);
-        btnBrowser.setText("🌐 فتح المتصفح وقنص الفيديوهات");
-        btnBrowser.setBackgroundColor(Color.parseColor("#0288D1"));
-        btnBrowser.setTextColor(Color.WHITE);
-        btnBrowser.setLayoutParams(btnParams);
-        btnBrowser.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
-                startActivity(intent);
-            }
-        });
-        layout.addView(btnBrowser);
-
-        Button btnLocalCast = new Button(this);
-        btnLocalCast.setText("📁 بث فيديو أو صورة أو صوت (Local Cast)");
-        btnLocalCast.setBackgroundColor(Color.parseColor("#E65100"));
-        btnLocalCast.setTextColor(Color.WHITE);
-        btnLocalCast.setLayoutParams(btnParams);
-        btnLocalCast.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                openMediaPicker();
-            }
-        });
-        layout.addView(btnLocalCast);
-
-        setContentView(layout);
-    }
-
-    private void openMediaPicker() {
+    private void openMediaPicker(boolean multipleImages) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        String[] mimeTypes = {"video/*", "image/*", "audio/*"};
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(intent, PICK_MEDIA_REQUEST);
+
+        if (multipleImages) {
+            intent.setType("image/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(intent, PICK_SLIDESHOW_REQUEST);
+        } else {
+            intent.setType("*/*");
+            String[] mimeTypes = {"video/*", "image/*", "audio/*"};
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes);
+            startActivityForResult(intent, PICK_MEDIA_REQUEST);
+        }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_MEDIA_REQUEST && resultCode == RESULT_OK && data != null) {
-            selectedMediaUri = data.getData();
-            if (selectedMediaUri != null) {
-                try {
-                    final int takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
-                    getContentResolver().takePersistableUriPermission(selectedMediaUri, takeFlags);
-                } catch (Exception ignored) {}
-                castLocalMediaToTv();
+        slideHandler.removeCallbacks(slideRunnable);
+
+        if (resultCode == RESULT_OK && data != null) {
+            if (requestCode == PICK_MEDIA_REQUEST && data.getData() != null) {
+                selectedMediaUri = data.getData();
+                takePermissions(selectedMediaUri);
+                castLocalMediaToTv(true);
+            } else if (requestCode == PICK_SLIDESHOW_REQUEST) {
+                slideshowQueue.clear();
+                ClipData clipData = data.getClipData();
+                if (clipData != null) {
+                    for (int i = 0; i < clipData.getItemCount(); i++) {
+                        Uri uri = clipData.getItemAt(i).getUri();
+                        takePermissions(uri);
+                        slideshowQueue.add(uri);
+                    }
+                } else if (data.getData() != null) {
+                    takePermissions(data.getData());
+                    slideshowQueue.add(data.getData());
+                }
+
+                if (!slideshowQueue.isEmpty()) {
+                    currentSlideIndex = 0;
+                    selectedMediaUri = slideshowQueue.get(0);
+                    castLocalMediaToTv(true);
+                    if (slideshowQueue.size() > 1) {
+                        slideHandler.postDelayed(slideRunnable, 5000);
+                        Toast.makeText(this, "بدأ العرض التقديمي (" + slideshowQueue.size() + " صور)", Toast.LENGTH_SHORT).show();
+                    }
+                }
             }
         }
     }
 
-    private void startLocalServer() {
+    private void takePermissions(Uri uri) {
         try {
-            if (localServer == null) {
-                localServer = new LocalMediaServer(8088);
-                localServer.start();
-            }
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Exception ignored) {}
     }
 
@@ -267,62 +248,80 @@ public class MainActivity extends Activity {
         return "";
     }
 
-    private void castLocalMediaToTv() {
+    private void castLocalMediaToTv(boolean showToast) {
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
+            if (showToast) Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
             return;
         }
 
         String phoneIp = getDeviceIpAddress();
         if (phoneIp.isEmpty() || phoneIp.equals("0.0.0.0")) {
-            Toast.makeText(this, "تأكد من اتصال الهاتف بالواي فاي", Toast.LENGTH_LONG).show();
+            if (showToast) Toast.makeText(this, "تأكد من اتصال الهاتف بالواي فاي", Toast.LENGTH_SHORT).show();
             return;
         }
 
         String mime = getContentResolver().getType(selectedMediaUri);
         String targetUrl;
+        // إرسال رابط الصورة الصريح مباشرة دون أي طبقة HTML وسيطة
         if (mime != null && mime.startsWith("image/")) {
-            targetUrl = "http://" + phoneIp + ":8088/view_image";
+            targetUrl = "http://" + phoneIp + ":8088/media.jpg";
         } else {
             targetUrl = "http://" + phoneIp + ":8088/media";
         }
 
         try {
             String endpoint = tvIp;
-            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
-                endpoint = "http://" + endpoint;
-            }
-            if (!endpoint.contains(":8080")) {
-                endpoint = endpoint + ":8080";
-            }
+            if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
+            if (!endpoint.contains(":8080")) endpoint += ":8080";
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(targetUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "تعذر الإرسال: تأكد أن الشاشة والهاتف على نفس الشبكة", Toast.LENGTH_LONG).show();
-                        }
-                    });
+                    if (showToast) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "فشل الإرسال للشاشة", Toast.LENGTH_SHORT).show());
+                    }
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "جاري العرض على الشاشة الآن ✓", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    if (showToast) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "جاري العرض على الشاشة ✓", Toast.LENGTH_SHORT).show());
+                    }
                 }
             });
-        } catch (Exception e) {
-            Toast.makeText(this, "خطأ في الرابط المحلي", Toast.LENGTH_SHORT).show();
-        }
+        } catch (Exception ignored) {}
+    }
+
+    private void sendRemoteCommand(String cmd) {
+        String tvIp = prefs.getString("tv_ip", "").trim();
+        if (tvIp.isEmpty()) return;
+
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
+            if (!endpoint.contains(":8080")) endpoint += ":8080";
+
+            String fullUrl = endpoint + "/?command=" + cmd;
+            Request req = new Request.Builder().url(fullUrl).build();
+            client.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {}
+                @Override
+                public void onResponse(Call call, Response response) {}
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void startLocalServer() {
+        try {
+            if (localServer == null) {
+                localServer = new LocalMediaServer(8088);
+                localServer.start();
+            }
+        } catch (Exception ignored) {}
     }
 
     private class LocalMediaServer extends NanoHTTPD {
@@ -332,60 +331,44 @@ public class MainActivity extends Activity {
 
         @Override
         public Response serve(IHTTPSession session) {
-            String uriPath = session.getUri();
-
             if (selectedMediaUri != null) {
-                if ("/view_image".equals(uriPath)) {
-                    String phoneIp = getDeviceIpAddress();
-                    String html = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
-                            "<style>body{margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden;}" +
-                            "img{max-width:100%;max-height:100%;object-fit:contain;}</style></head>" +
-                            "<body><img src='http://" + phoneIp + ":8088/media'></body></html>";
-                    return newFixedLengthResponse(Response.Status.OK, "text/html", html);
-                }
+                try {
+                    AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(selectedMediaUri, "r");
+                    if (afd != null) {
+                        long fileLength = afd.getLength();
+                        String mime = getContentResolver().getType(selectedMediaUri);
+                        if (mime == null) mime = "application/octet-stream";
 
-                if ("/media".equals(uriPath)) {
-                    try {
-                        AssetFileDescriptor afd = getContentResolver().openAssetFileDescriptor(selectedMediaUri, "r");
-                        if (afd != null) {
-                            long fileLength = afd.getLength();
-                            String mime = getContentResolver().getType(selectedMediaUri);
-                            if (mime == null) {
-                                mime = "video/mp4";
-                            }
+                        Map<String, String> headers = session.getHeaders();
+                        String range = headers.get("range");
 
-                            Map<String, String> headers = session.getHeaders();
-                            String range = headers.get("range");
+                        if (range != null && range.startsWith("bytes=")) {
+                            String[] parts = range.substring("bytes=".length()).split("-");
+                            long start = Long.parseLong(parts[0]);
+                            long end = (parts.length > 1 && !parts[1].isEmpty()) ? Long.parseLong(parts[1]) : fileLength - 1;
+                            if (end >= fileLength) end = fileLength - 1;
+                            long contentLength = end - start + 1;
 
-                            if (range != null && range.startsWith("bytes=")) {
-                                String[] parts = range.substring("bytes=".length()).split("-");
-                                long start = Long.parseLong(parts[0]);
-                                long end = (parts.length > 1 && !parts[1].isEmpty()) ? Long.parseLong(parts[1]) : fileLength - 1;
+                            FileInputStream fis = afd.createInputStream();
+                            fis.skip(start);
 
-                                if (end >= fileLength) end = fileLength - 1;
-                                long contentLength = end - start + 1;
-
-                                FileInputStream fis = afd.createInputStream();
-                                fis.skip(start);
-
-                                Response res = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, fis, contentLength);
-                                res.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
-                                res.addHeader("Content-Length", String.valueOf(contentLength));
-                                res.addHeader("Accept-Ranges", "bytes");
-                                res.addHeader("Access-Control-Allow-Origin", "*");
-                                return res;
-                            } else {
-                                FileInputStream fis = afd.createInputStream();
-                                Response res = newFixedLengthResponse(Response.Status.OK, mime, fis, fileLength);
-                                res.addHeader("Content-Length", String.valueOf(fileLength));
-                                res.addHeader("Accept-Ranges", "bytes");
-                                res.addHeader("Access-Control-Allow-Origin", "*");
-                                return res;
-                            }
+                            Response res = newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, fis, contentLength);
+                            res.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+                            res.addHeader("Content-Length", String.valueOf(contentLength));
+                            res.addHeader("Accept-Ranges", "bytes");
+                            res.addHeader("Access-Control-Allow-Origin", "*");
+                            return res;
+                        } else {
+                            FileInputStream fis = afd.createInputStream();
+                            Response res = newFixedLengthResponse(Response.Status.OK, mime, fis, fileLength);
+                            res.addHeader("Content-Length", String.valueOf(fileLength));
+                            res.addHeader("Accept-Ranges", "bytes");
+                            res.addHeader("Access-Control-Allow-Origin", "*");
+                            return res;
                         }
-                    } catch (Exception e) {
-                        return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error loading file");
                     }
+                } catch (Exception e) {
+                    return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Error loading file");
                 }
             }
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "No media selected");
@@ -395,6 +378,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        slideHandler.removeCallbacks(slideRunnable);
         if (localServer != null) {
             localServer.stop();
         }
