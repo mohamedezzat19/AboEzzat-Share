@@ -469,7 +469,6 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                // كود جافاسكريبت لجلب اسم المنشور الحقيقي وبوستر الفيديو من الميتا تاجز
                 String js = "javascript:(function(){" +
                         "try{" +
                         "  var title = '';" +
@@ -514,7 +513,6 @@ public class BrowserActivity extends Activity {
             if (posterUrl != null && !posterUrl.isEmpty()) {
                 lastDiscoveredPoster = posterUrl;
             }
-            // تحديث العناوين والصور الملتقطة مسبقاً إذا كانت بدون اسم
             for (CapturedMedia item : capturedList) {
                 if (item.posterBitmap == null && !lastDiscoveredPoster.isEmpty()) {
                     item.posterUrl = lastDiscoveredPoster;
@@ -766,7 +764,6 @@ public class BrowserActivity extends Activity {
         dialog.show();
     }
 
-    // تصميم القائمة بالترتيب المطلوب: الثلاث نقط على اليمين خالص، الاسم في النص، والصورة على الشمال
     private View buildMediaListView(final Dialog dialog) {
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
@@ -805,7 +802,6 @@ public class BrowserActivity extends Activity {
                 row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setBackgroundColor(Color.parseColor("#1F1F1F"));
 
-                // 1. على اليمين خالص: زر الثلاث نقط ⋮
                 TextView tvMore = new TextView(BrowserActivity.this);
                 tvMore.setText("⋮");
                 tvMore.setTextColor(Color.WHITE);
@@ -813,7 +809,6 @@ public class BrowserActivity extends Activity {
                 tvMore.setPadding(10, 0, 20, 0);
                 row.addView(tvMore);
 
-                // 2. في المنتصف: العنوان الحقيقي والصيغة مع مسافات مريحة
                 LinearLayout infoLayout = new LinearLayout(BrowserActivity.this);
                 infoLayout.setOrientation(LinearLayout.VERTICAL);
                 LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
@@ -837,7 +832,6 @@ public class BrowserActivity extends Activity {
 
                 row.addView(infoLayout);
 
-                // 3. على الشمال خالص: صورة البوستر الحقيقية للمقطع
                 ImageView thumb = new ImageView(BrowserActivity.this);
                 LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(130, 110);
                 thumb.setLayoutParams(thumbParams);
@@ -911,7 +905,7 @@ public class BrowserActivity extends Activity {
                 .show();
     }
 
-    // دمج مسار الصوت مع مسار الصورة وإرسال الرابط المكتمل للشاشة
+    // دالة الإرسال المدمج للشاشة برابط الصوت ورابط الصورة معاً
     private void mergeAndCastToTv() {
         String videoTrackUrl = "";
         String audioTrackUrl = "";
@@ -930,16 +924,54 @@ public class BrowserActivity extends Activity {
         }
 
         if (audioTrackUrl.isEmpty()) {
-            // إذا لم يتوفر مسار صوت منفصل، يبث الفيديو مباشرة
             castToTv(videoTrackUrl);
             return;
         }
 
-        Toast.makeText(this, "جاري تحضير البث المدمج بالصوت والصورة...", Toast.LENGTH_SHORT).show();
+        if (tvIp.isEmpty()) {
+            Toast.makeText(this, "يرجى تعيين IP الشاشة من القائمة أولاً", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-        // إرسال زوج الروابط للشاشة معاً ليقوم ExoPlayer بتشغيلهما متزامنين
-        String combinedUrl = videoTrackUrl + "##EXT_AUDIO##" + audioTrackUrl;
-        castToTv(combinedUrl);
+        Toast.makeText(this, "جاري إرسال البث المدمج للشاشة...", Toast.LENGTH_SHORT).show();
+
+        try {
+            String endpoint = tvIp;
+            if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+                endpoint = "http://" + endpoint;
+            }
+            if (!endpoint.contains(":8080")) {
+                endpoint = endpoint + ":8080";
+            }
+
+            String fullUrl = endpoint + "/?video=" + URLEncoder.encode(videoTrackUrl, "UTF-8") 
+                                      + "&audio=" + URLEncoder.encode(audioTrackUrl, "UTF-8");
+
+            Request req = new Request.Builder().url(fullUrl).build();
+            client.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الاتصال", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(BrowserActivity.this, "تم بدء العرض المدمج في الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            });
+        } catch (Exception e) {
+            Toast.makeText(this, "خطأ في الرابط", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void castToTv(String mediaUrl) {
