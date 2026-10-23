@@ -40,6 +40,7 @@ public class ShareActivity extends Activity {
             .build();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private FrameLayout rootLayout;
     private WebView webView;
     private boolean isCaptured = false;
     private String targetTvIp = "";
@@ -48,7 +49,7 @@ public class ShareActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        FrameLayout rootLayout = new FrameLayout(this);
+        rootLayout = new FrameLayout(this);
         rootLayout.setBackgroundColor(Color.TRANSPARENT);
         ProgressBar progressBar = new ProgressBar(this);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
@@ -95,36 +96,29 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 1. يوتيوب (ثابت كما هو)
+        // 1. يوتيوب (ثابت وشغال 100%)
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             sendToTv(targetTvIp, url);
             return;
         }
 
-        // 2. تيك توك العادي (ثابت كما هو عبر tikwm)
+        // 2. تيك توك العادي (ثابت وشغال 100% عبر tikwm)
         if (url.contains("tiktok.com") && !url.contains("/live")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             extractTikTokVideo(url);
             return;
         }
 
-        // 3. لايف تيك توك (استخراج مباشر عبر Live API الداخلي)
-        if (url.contains("tiktok.com") && url.contains("/live")) {
-            Toast.makeText(this, "جاري قنص بث تيك توك المباشر...", Toast.LENGTH_SHORT).show();
-            extractTikTokLive(url);
-            return;
-        }
-
-        // 4. إنستجرام: جلب رابط الـ Progressive MP4 (صوت + صورة مدمجين) من الصفحة
+        // 3. إنستجرام: تنظيف الرابط وفك الصوت والصورة عبر صفحة الـ Embed المدمجة
         if (url.contains("instagram.com")) {
             Toast.makeText(this, "جاري استخراج ريل إنستجرام بصوت وصورة...", Toast.LENGTH_SHORT).show();
-            startInstagramSniffing(url);
+            processInstagramUrl(url);
             return;
         }
 
-        // 5. باقي المنصات (تويتر، ثريدز، فيسبوك) - القناص المباشر
+        // 4. تويتر، فيسبوك، وثريدز: القناص المباشر الشغال ممتاز
         Toast.makeText(this, "جاري قنص وتشغيل الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
-        startGeneralSniffing(url);
+        startSniffing(url);
     }
 
     private void extractTikTokVideo(final String url) {
@@ -135,7 +129,7 @@ public class ShareActivity extends Activity {
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    mainHandler.post(() -> startGeneralSniffing(url));
+                    mainHandler.post(() -> startSniffing(url));
                 }
 
                 @Override
@@ -153,108 +147,73 @@ public class ShareActivity extends Activity {
                             }
                         }
                     } catch (Exception ignored) {}
-                    mainHandler.post(() -> startGeneralSniffing(url));
+                    mainHandler.post(() -> startSniffing(url));
                 }
             });
         } catch (Exception e) {
-            startGeneralSniffing(url);
+            startSniffing(url);
         }
     }
 
-    private void extractTikTokLive(final String url) {
-        // محاولة استخراج اسم الحساب من رابط البث
-        Pattern pattern = Pattern.compile("@([a-zA-Z0-9_.-]+)");
-        Matcher matcher = pattern.matcher(url);
+    private void processInstagramUrl(String rawUrl) {
+        // استخراج كود المنشور أو الريل لتحويله لرابط Embed موحد
+        Pattern pattern = Pattern.compile("instagram\\.com/(?:reel|reels|p)/([a-zA-Z0-9_-]+)");
+        Matcher matcher = pattern.matcher(rawUrl);
+        String targetEmbedUrl = rawUrl.split("\\?")[0];
+
         if (matcher.find()) {
-            String username = matcher.group(1);
-            String apiUrl = "https://www.tiktok.com/api-live/user/room/?uniqueId=" + username + "&sourceType=54";
-
-            Request request = new Request.Builder()
-                    .url(apiUrl)
-                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .build();
-
-            client.newCall(request).enqueue(new Callback() {
-                @Override
-                public void onFailure(Call call, IOException e) {
-                    mainHandler.post(() -> startGeneralSniffing(url));
-                }
-
-                @Override
-                public void onResponse(Call call, Response response) throws IOException {
-                    try {
-                        String resp = response.body().string();
-                        JSONObject json = new JSONObject(resp);
-                        JSONObject liveRoom = json.getJSONObject("data").getJSONObject("liveRoom");
-                        String streamDataStr = liveRoom.getJSONObject("streamUrl").getString("live_core_sdk_data");
-                        JSONObject streamObj = new JSONObject(streamDataStr);
-                        JSONObject pullDatas = streamObj.getJSONObject("pull_data").getJSONObject("stream_data");
-
-                        // استخراج أول رابط بث حي متاح (FLV أو HLS)
-                        String pullUrl = "";
-                        for (java.util.Iterator<String> it = pullDatas.keys(); it.hasNext(); ) {
-                            String key = it.next();
-                            JSONObject quality = pullDatas.getJSONObject(key);
-                            if (quality.has("main")) {
-                                JSONObject mainStream = quality.getJSONObject("main");
-                                pullUrl = mainStream.optString("flv", mainStream.optString("hls"));
-                                if (!pullUrl.isEmpty()) break;
-                            }
-                        }
-
-                        if (!pullUrl.isEmpty()) {
-                            final String liveStream = pullUrl;
-                            mainHandler.post(() -> sendToTv(targetTvIp, liveStream));
-                            return;
-                        }
-                    } catch (Exception ignored) {}
-                    mainHandler.post(() -> startGeneralSniffing(url));
-                }
-            });
-        } else {
-            startGeneralSniffing(url);
+            String shortCode = matcher.group(1);
+            targetEmbedUrl = "https://www.instagram.com/p/" + shortCode + "/embed/captioned/";
         }
+
+        startInstagramSniffing(targetEmbedUrl, rawUrl);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private void startInstagramSniffing(String url) {
+    private void startInstagramSniffing(String embedUrl, String fallbackUrl) {
         isCaptured = false;
         webView = new WebView(this);
+        rootLayout.addView(webView, new FrameLayout.LayoutParams(1, 1)); // ربط بالواجهة لمنع تجميد النظام له
+
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        settings.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onMediaFound(String mediaUrl) {
-                if (!isCaptured && mediaUrl != null && !mediaUrl.isEmpty()) {
-                    isCaptured = true;
-                    mainHandler.post(() -> {
-                        sendToTv(targetTvIp, cleanCdnUrl(mediaUrl));
-                        destroyWebView();
-                    });
-                }
+                checkAndSendMedia(mediaUrl);
             }
         }, "MediaSniffer");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String reqUrl = request.getUrl().toString();
+                checkAndSendMedia(reqUrl);
+                return super.shouldInterceptRequest(view, request);
+            }
+
+            @Override
             public void onPageFinished(WebView view, String loadedUrl) {
                 super.onPageFinished(view, loadedUrl);
-                // فحص كود الصفحة لاستخراج رابط الفيديو الكامل المدمج (og:video أو وسوم الفيديو)
+                // محاكاة النقر على تشغيل وتخطي نوافذ المتابعة
                 String js = "(function() { " +
-                        "   var ogVideo = document.querySelector('meta[property=\"og:video\"]'); " +
-                        "   if (ogVideo && ogVideo.content) { " +
-                        "       window.MediaSniffer.onMediaFound(ogVideo.content); " +
-                        "       return; " +
+                        "   var btns = document.querySelectorAll('button, div, a'); " +
+                        "   for (var j=0; j<btns.length; j++) { " +
+                        "       var txt = btns[j].innerText || ''; " +
+                        "       if (txt.includes('ليس الآن') || txt.includes('Not Now') || txt.includes('Play')) { " +
+                        "           btns[j].click(); " +
+                        "       } " +
                         "   } " +
                         "   var vids = document.getElementsByTagName('video'); " +
                         "   for (var i = 0; i < vids.length; i++) { " +
-                        "       var src = vids[i].src || vids[i].currentSrc; " +
+                        "       try { vids[i].play(); } catch(e){} " +
+                        "       var src = vids[i].currentSrc || vids[i].src; " +
                         "       if (src && src.startsWith('http')) { " +
                         "           window.MediaSniffer.onMediaFound(src); " +
-                        "           return; " +
                         "       } " +
                         "   } " +
                         "})();";
@@ -262,20 +221,22 @@ public class ShareActivity extends Activity {
             }
         });
 
-        webView.loadUrl(url);
+        webView.loadUrl(embedUrl);
 
         mainHandler.postDelayed(() -> {
             if (!isCaptured) {
                 destroyWebView();
-                startGeneralSniffing(url);
+                startSniffing(fallbackUrl.split("\\?")[0]);
             }
-        }, 8000);
+        }, 10000);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private void startGeneralSniffing(String url) {
+    private void startSniffing(String url) {
         isCaptured = false;
         webView = new WebView(this);
+        rootLayout.addView(webView, new FrameLayout.LayoutParams(1, 1));
+
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -309,12 +270,6 @@ public class ShareActivity extends Activity {
                         "           window.MediaSniffer.onMediaFound(src); " +
                         "       } " +
                         "   } " +
-                        "   var btns = document.querySelectorAll('button, div'); " +
-                        "   for (var j=0; j<btns.length; j++) { " +
-                        "       if (btns[j].innerText && (btns[j].innerText.includes('Play') || btns[j].innerText.includes('تشغيل') || btns[j].innerText.includes('Watch'))) { " +
-                        "           btns[j].click(); " +
-                        "       } " +
-                        "   } " +
                         "})();";
                 view.evaluateJavascript(js, null);
             }
@@ -334,25 +289,29 @@ public class ShareActivity extends Activity {
     private synchronized void checkAndSendMedia(String reqUrl) {
         if (isCaptured || reqUrl == null || reqUrl.isEmpty()) return;
 
-        String cleanUrl = cleanCdnUrl(reqUrl);
+        // تنظيف الرابط من معاملات التجزئة
+        String cleanUrl = reqUrl;
+        if (cleanUrl.contains("&bytestart=")) {
+            cleanUrl = cleanUrl.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
+        }
+
         String lower = cleanUrl.toLowerCase();
 
-        // استبعاد الملفات غير المرغوبة
         if (lower.contains(".jpg") || lower.contains(".png") || lower.contains(".webp") ||
             lower.contains(".js") || lower.contains(".css") || lower.contains("rsrc.php") ||
             lower.contains("preview")) {
             return;
         }
 
-        // قنص البث الحي HLS / FLV
+        // استبعاد مسارات الصوت المنفصلة لضمان التقاط ملف الفيديو المدمج
+        boolean isAudioOnly = lower.contains("audio") || lower.contains("dash_ln_heaac");
+
         boolean isLiveStream = lower.contains(".m3u8") ||
                                lower.contains(".flv") ||
                                lower.contains("pull-flv") ||
                                lower.contains("pull-hls") ||
                                lower.contains("live-hls");
 
-        // قنص الفيديوهات الصريحة مع استبعاد روابط الصوت المنفصلة
-        boolean isAudioOnly = lower.contains("audio") || lower.contains("dash_ln_heaac");
         boolean isDirectVideo = (lower.contains(".mp4") && !isAudioOnly) ||
                                 lower.contains("video_playback") ||
                                 lower.contains("&mime=video");
@@ -367,18 +326,13 @@ public class ShareActivity extends Activity {
         }
     }
 
-    private String cleanCdnUrl(String rawUrl) {
-        // إزالة محددات الأجزاء ليعمل الملف كتدفق كامل بصوت وصورة
-        if (rawUrl.contains("&bytestart=")) {
-            return rawUrl.replaceAll("&bytestart=\\d+", "").replaceAll("&byteend=\\d+", "");
-        }
-        return rawUrl;
-    }
-
     private void destroyWebView() {
         if (webView != null) {
-            webView.stopLoading();
-            webView.destroy();
+            try {
+                rootLayout.removeView(webView);
+                webView.stopLoading();
+                webView.destroy();
+            } catch (Exception ignored) {}
             webView = null;
         }
     }
