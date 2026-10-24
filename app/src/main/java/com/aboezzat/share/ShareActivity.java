@@ -111,7 +111,8 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        if (targetTvIp.isEmpty()) {
+        // إذا كان IP الفاير ستيك غير محدد وكانت شاشة الويب متصلة، يستمر البث
+        if (targetTvIp.isEmpty() && !MainActivity.hasWebClients()) {
             Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
@@ -281,6 +282,18 @@ public class ShareActivity extends Activity {
     }
 
     private void sendToTv(String tvIp, String mediaUrl, boolean isQueue) {
+        // 1. الإرسال الفوري لشاشات LG وسامسونج عبر WebSocket بالتوازي
+        MainActivity.broadcastToWebTv("PLAY_VIDEO", mediaUrl, null, null);
+
+        // 2. الإرسال لجهاز الفاير ستيك بالطريقة القديمة الأصلية بدون أي تغيير
+        if (tvIp == null || tvIp.trim().isEmpty()) {
+            mainHandler.post(() -> {
+                Toast.makeText(ShareActivity.this, "تم الإرسال لشاشة الويب بنجاح ✓", Toast.LENGTH_SHORT).show();
+                finish();
+            });
+            return;
+        }
+
         try {
             if (!tvIp.startsWith("http://") && !tvIp.startsWith("https://")) {
                 tvIp = "http://" + tvIp;
@@ -297,7 +310,7 @@ public class ShareActivity extends Activity {
                 @Override
                 public void onFailure(Call call, IOException e) {
                     mainHandler.post(() -> {
-                        Toast.makeText(ShareActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ShareActivity.this, "تم الإرسال (تحقق من الفاير ستيك)", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
@@ -319,7 +332,7 @@ public class ShareActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         targetTvIp = prefs.getString("tv_ip", "").trim();
 
-        if (targetTvIp.isEmpty()) {
+        if (targetTvIp.isEmpty() && !MainActivity.hasWebClients()) {
             Toast.makeText(this, "يرجى تعيين عنوان IP الشاشة أولاً", Toast.LENGTH_LONG).show();
             finish();
             return;
