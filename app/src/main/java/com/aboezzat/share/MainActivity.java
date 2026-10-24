@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     private static final int PICK_MEDIA_REQUEST = 101;
     private static final int PICK_SLIDESHOW_REQUEST = 102;
+    private static final int TV_RECEIVER_PORT = 1997; // المنفذ المخصص للمستقبل لتفادي تعارض البروكسي
 
     private EditText etTvIp;
     private TextView tvStatusBadge;
@@ -222,7 +223,7 @@ public class MainActivity extends Activity {
                 String testIp = subnet + i;
                 try {
                     Socket socket = new Socket();
-                    socket.connect(new InetSocketAddress(testIp, 8080), 35);
+                    socket.connect(new InetSocketAddress(testIp, TV_RECEIVER_PORT), 35);
                     socket.close();
                     foundIp = testIp;
                     break;
@@ -301,7 +302,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TV_RECEIVER_PORT)) endpoint += ":" + TV_RECEIVER_PORT;
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
@@ -345,7 +346,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, data: Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         slideHandler.removeCallbacks(slideRunnable);
         isSlideshowRunning = false;
@@ -451,7 +452,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TV_RECEIVER_PORT)) endpoint += ":" + TV_RECEIVER_PORT;
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(targetUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
@@ -480,7 +481,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TV_RECEIVER_PORT)) endpoint += ":" + TV_RECEIVER_PORT;
 
             String fullUrl = endpoint + "/?command=" + cmd;
             Request req = new Request.Builder().url(fullUrl).build();
