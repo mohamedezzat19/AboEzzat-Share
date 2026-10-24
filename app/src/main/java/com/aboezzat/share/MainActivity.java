@@ -9,10 +9,12 @@ import android.content.res.AssetFileDescriptor;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.format.Formatter;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -25,8 +27,11 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,9 +41,14 @@ import okhttp3.Callback;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import org.java_websocket.WebSocket;
+import org.java_websocket.handshake.ClientHandshake;
+import org.java_websocket.server.WebSocketServer;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
+    private static final String TAG = "MainActivity";
     private static final int PICK_MEDIA_REQUEST = 101;
     private static final int PICK_SLIDESHOW_REQUEST = 102;
 
@@ -48,6 +58,10 @@ public class MainActivity extends Activity {
     private final OkHttpClient client = new OkHttpClient();
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
+
+    // خادم الـ WebSocket لشاشات LG و Samsung
+    private static TVWebSocketServer tvWsServer;
+    private static final Set<WebSocket> webClients = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     // طابور الصور المتتابعة
     private final List<Uri> slideshowQueue = new ArrayList<>();
@@ -77,7 +91,10 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
+        
+        // تشغيل سيرفر الميديا وسيرفر الشاشات الجديد
         startLocalServer();
+        startTVWebSocketServer();
 
         if (handleIncomingShareIntent(getIntent())) {
             return;
@@ -114,7 +131,6 @@ public class MainActivity extends Activity {
         findViewById(R.id.card_local_media).setOnClickListener(v -> openMediaPicker(false));
         findViewById(R.id.card_slideshow).setOnClickListener(v -> openMediaPicker(true));
 
-        // زر التشغيل والإيقاف المؤقت المزدوج
         findViewById(R.id.btn_play_pause).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 if (isSlideshowRunning) {
@@ -128,14 +144,20 @@ public class MainActivity extends Activity {
                 }
             } else {
                 sendRemoteCommand("play_pause");
+                broadcastToWebTv("PAUSE", null, null, null);
             }
         });
 
-        // التقديم والتأخير 10 ثواني
-        findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rw"));
-        findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("ff"));
+        findViewById(R.id.btn_rewind).setOnClickListener(v -> {
+            sendRemoteCommand("rw");
+            broadcastRelativeSeek(-10);
+        });
 
-        // زر التالي الذكي (يدعم الصور المتتابعة وفيديوهات الطابور والشاشة)
+        findViewById(R.id.btn_forward).setOnClickListener(v -> {
+            sendRemoteCommand("ff");
+            broadcastRelativeSeek(10);
+        });
+
         findViewById(R.id.btn_next).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
@@ -147,10 +169,10 @@ public class MainActivity extends Activity {
                 castLocalMediaToTv(true);
             } else {
                 sendRemoteCommand("next");
+                broadcastRelativeSeek(30);
             }
         });
 
-        // زر السابق الذكي
         findViewById(R.id.btn_prev).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 currentSlideIndex = (currentSlideIndex - 1 + slideshowQueue.size()) % slideshowQueue.size();
@@ -162,13 +184,24 @@ public class MainActivity extends Activity {
                 castLocalMediaToTv(true);
             } else {
                 sendRemoteCommand("prev");
+                broadcastRelativeSeek(-30);
             }
         });
 
-        // أزرار التحكم بالصوت
-        findViewById(R.id.btn_vol_up).setOnClickListener(v -> sendRemoteCommand("vol_up"));
-        findViewById(R.id.btn_vol_down).setOnClickListener(v -> sendRemoteCommand("vol_down"));
-        findViewById(R.id.btn_mute).setOnClickListener(v -> sendRemoteCommand("mute"));
+        findViewById(R.id.btn_vol_up).setOnClickListener(v -> {
+            sendRemoteCommand("vol_up");
+            broadcastToWebTv("VOLUME_UP", null, null, null);
+        });
+
+        findViewById(R.id.btn_vol_down).setOnClickListener(v -> {
+            sendRemoteCommand("vol_down");
+            broadcastToWebTv("VOLUME_DOWN", null, null, null);
+        });
+
+        findViewById(R.id.btn_mute).setOnClickListener(v -> {
+            sendRemoteCommand("mute");
+            broadcastToWebTv("MUTE_TOGGLE", null, null, null);
+        });
     }
 
     private void scanForTvIp() {
@@ -253,9 +286,15 @@ public class MainActivity extends Activity {
     }
 
     private void castUrlDirectlyToTv(String mediaUrl) {
+        broadcastToWebTv("PLAY_VIDEO", mediaUrl, null, null);
+
         String tvIp = prefs.getString("tv_ip", "").trim();
         if (tvIp.isEmpty()) {
-            Toast.makeText(this, "يرجى تعيين عنوان الشاشة أولاً", Toast.LENGTH_LONG).show();
+            if (hasWebClients()) {
+                Toast.makeText(this, "تم الإرسال لشاشة الويب بنجاح ✓", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "يرجى تعيين عنوان الشاشة أولاً", Toast.LENGTH_LONG).show();
+            }
             return;
         }
 
@@ -270,7 +309,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onFailure(Call call, IOException e) {
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "تعذر الإرسال للشاشة", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "تم الإرسال لشاشة الويب فقط", Toast.LENGTH_SHORT).show();
                         finish();
                     });
                 }
@@ -288,12 +327,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    // تمكين اختيار عدة فيديوهات أو صور
     private void openMediaPicker(boolean multipleImages) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); // تفعيل التحديد المتعدد
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
 
         if (multipleImages) {
             intent.setType("image/*");
@@ -385,12 +423,6 @@ public class MainActivity extends Activity {
     }
 
     private void castLocalMediaToTv(boolean showToast) {
-        String tvIp = prefs.getString("tv_ip", "").trim();
-        if (tvIp.isEmpty()) {
-            if (showToast) Toast.makeText(this, "يرجى كتابة وحفظ IP الشاشة أولاً", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         String phoneIp = getDeviceIpAddress();
         if (phoneIp.isEmpty() || phoneIp.equals("0.0.0.0")) {
             if (showToast) Toast.makeText(this, "تأكد من اتصال الهاتف بالواي فاي", Toast.LENGTH_SHORT).show();
@@ -398,8 +430,23 @@ public class MainActivity extends Activity {
         }
 
         String mime = getContentResolver().getType(selectedMediaUri);
-        String targetUrl = (mime != null && mime.startsWith("image/")) ?
+        boolean isImg = (mime != null && mime.startsWith("image/"));
+        String targetUrl = isImg ?
                 "http://" + phoneIp + ":8088/media.jpg" : "http://" + phoneIp + ":8088/media.mp4";
+
+        if (isImg) {
+            broadcastToWebTv("SHOW_IMAGE", targetUrl, null, null);
+        } else {
+            broadcastToWebTv("PLAY_VIDEO", targetUrl, null, null);
+        }
+
+        String tvIp = prefs.getString("tv_ip", "").trim();
+        if (tvIp.isEmpty()) {
+            if (showToast && hasWebClients()) {
+                Toast.makeText(this, "جاري العرض على شاشة الويب ✓", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
 
         try {
             String endpoint = tvIp;
@@ -411,8 +458,8 @@ public class MainActivity extends Activity {
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    if (showToast) {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "فشل الإرسال للشاشة", Toast.LENGTH_SHORT).show());
+                    if (showToast && !hasWebClients()) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "فشل الإرسال للفاير ستيك", Toast.LENGTH_SHORT).show());
                     }
                 }
 
@@ -444,6 +491,92 @@ public class MainActivity extends Activity {
                 public void onResponse(Call call, Response response) {}
             });
         } catch (Exception ignored) {}
+    }
+
+    // ==========================================
+    // سيرفر WebSocket لشاشات الويب (LG / Samsung)
+    // ==========================================
+    private void startTVWebSocketServer() {
+        if (tvWsServer != null) return;
+        try {
+            tvWsServer = new TVWebSocketServer(8088);
+            tvWsServer.start();
+            Log.d(TAG, "سيرفر شاشات LG وسامسونج بدأ على البورت 8088");
+        } catch (Exception e) {
+            try {
+                tvWsServer = new TVWebSocketServer(8089);
+                tvWsServer.start();
+                Log.d(TAG, "سيرفر شاشات LG وسامسونج بدأ على البورت 8089");
+            } catch (Exception ex) {
+                Log.e(TAG, "فشل تشغيل سيرفر الشاشات", ex);
+            }
+        }
+    }
+
+    public static boolean hasWebClients() {
+        return !webClients.isEmpty();
+    }
+
+    public static void broadcastToWebTv(String action, String url, String audioUrl, String title) {
+        if (tvWsServer == null || webClients.isEmpty()) return;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("action", action);
+            if (url != null) obj.put("url", url);
+            if (audioUrl != null) obj.put("audioUrl", audioUrl);
+            if (title != null) obj.put("title", title);
+            obj.put("senderDevice", Build.MANUFACTURER + " " + Build.MODEL);
+
+            String message = obj.toString();
+            for (WebSocket conn : webClients) {
+                if (conn.isOpen()) conn.send(message);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "خطأ في بث الأمر للشاشة", e);
+        }
+    }
+
+    private void broadcastRelativeSeek(int seconds) {
+        if (tvWsServer == null || webClients.isEmpty()) return;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("action", "SEEK_RELATIVE");
+            obj.put("seconds", seconds);
+            for (WebSocket conn : webClients) {
+                if (conn.isOpen()) conn.send(obj.toString());
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private static class TVWebSocketServer extends WebSocketServer {
+        public TVWebSocketServer(int port) {
+            super(new InetSocketAddress(port));
+            setReuseAddr(true);
+        }
+
+        @Override
+        public void onOpen(WebSocket conn, ClientHandshake handshake) {
+            webClients.add(conn);
+            try {
+                JSONObject welcome = new JSONObject();
+                welcome.put("senderDevice", Build.MANUFACTURER + " " + Build.MODEL);
+                conn.send(welcome.toString());
+            } catch (Exception ignored) {}
+        }
+
+        @Override
+        public void onClose(WebSocket conn, int code, String reason, boolean remote) {
+            webClients.remove(conn);
+        }
+
+        @Override
+        public void onMessage(WebSocket conn, String message) {}
+
+        @Override
+        public void onError(WebSocket conn, Exception ex) {}
+
+        @Override
+        public void onStart() {}
     }
 
     private void startLocalServer() {
@@ -512,6 +645,11 @@ public class MainActivity extends Activity {
         slideHandler.removeCallbacks(slideRunnable);
         if (localServer != null) {
             localServer.stop();
+        }
+        if (tvWsServer != null) {
+            try {
+                tvWsServer.stop();
+            } catch (Exception ignored) {}
         }
     }
 }
