@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     private static final int PICK_MEDIA_REQUEST = 101;
     private static final int PICK_SLIDESHOW_REQUEST = 102;
-    private static final int TV_RECEIVER_PORT = 1997; // المنفذ المخصص للمستقبل لتفادي تعارض البروكسي
+    private static final int TV_RECEIVER_PORT = 1997;
 
     private EditText etTvIp;
     private TextView tvStatusBadge;
@@ -93,7 +93,6 @@ public class MainActivity extends Activity {
 
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         
-        // تشغيل سيرفر الميديا وسيرفر الشاشات الجديد
         startLocalServer();
         startTVWebSocketServer();
 
@@ -346,7 +345,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, data: Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         slideHandler.removeCallbacks(slideRunnable);
         isSlideshowRunning = false;
