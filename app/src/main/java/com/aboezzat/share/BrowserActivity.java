@@ -101,7 +101,7 @@ public class BrowserActivity extends Activity {
         public String format;
         public String posterUrl;
         public Bitmap posterBitmap;
-        public int mediaType; // 1: فيديو | 2: صوت | 0: غير معروف
+        public int mediaType;
         public boolean isAudio;
         public boolean isSelected = false;
 
@@ -692,31 +692,51 @@ public class BrowserActivity extends Activity {
             for (String entry : customSites) {
                 String[] parts = entry.split("\\|", 2);
                 if (parts.length == 2) {
-                    customCards.append("<a href='").append(parts[1]).append("' class='card'>").append(parts[0]).append("</a>");
+                    customCards.append("<a href='").append(parts[1]).append("' class='card'>")
+                               .append("<div class='icon-circle' style='background:#2C3E50;'>🌐</div>")
+                               .append("<span>").append(parts[0]).append("</span>")
+                               .append("</a>");
                 }
             }
         }
 
         String homeHtml = "<html dir='rtl'><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
-                "<style>body{background:#121212;color:white;font-family:sans-serif;text-align:center;padding:15px;margin:0;}" +
-                ".grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-top:20px;}" +
-                ".card{background:#1E1E1E;padding:14px 5px;border-radius:10px;text-decoration:none;color:white;font-size:13px;display:block;border:1px solid #333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
-                ".add-btn{background:#00897B;padding:12px;border-radius:10px;color:white;display:block;margin-top:20px;text-decoration:none;font-weight:bold;cursor:pointer;}" +
-                ".search-box{width:92%;padding:12px;border-radius:25px;border:none;margin-top:20px;font-size:14px;text-align:center;background:#2A2A2A;color:white;outline:none;}" +
+                "<style>" +
+                "body{background:#121212;color:white;font-family:sans-serif;text-align:center;padding:15px;margin:0;}" +
+                ".grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:14px;margin-top:20px;}" +
+                ".card{background:#1E1E1E;padding:12px 6px;border-radius:12px;text-decoration:none;color:white;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #2A2A2A;transition:transform 0.2s;}" +
+                ".card:active{transform:scale(0.95);background:#252525;}" +
+                ".card img{width:42px;height:42px;border-radius:10px;margin-bottom:8px;object-fit:cover;}" +
+                ".card span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;font-weight:bold;}" +
+                ".icon-circle{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:8px;}" +
+                ".add-btn{background:#00897B;padding:12px;border-radius:10px;color:white;display:block;margin-top:22px;text-decoration:none;font-weight:bold;cursor:pointer;border:1px solid #00A896;}" +
+                ".search-box{width:92%;padding:12px;border-radius:25px;border:1px solid #333;margin-top:20px;font-size:14px;text-align:center;background:#2A2A2A;color:white;outline:none;}" +
                 "</style></head><body>" +
-                "<h3 style='color:#00B0FF;margin-top:15px;'>Abo Ezzat Browser</h3>" +
+                "<h3 style='color:#00B0FF;margin-top:15px;font-size:20px;'>Abo Ezzat Browser</h3>" +
                 "<form action='https://www.google.com.eg/search' method='get'>" +
                 "<input type='hidden' name='gl' value='eg'>" +
                 "<input type='hidden' name='hl' value='ar'>" +
                 "<input type='text' name='q' class='search-box' placeholder='ابحث في جوجل مصر...'>" +
                 "</form>" +
                 "<div class='grid'>" +
-                "<a href='https://www.tiktok.com' class='card'>تيك توك</a>" +
-                "<a href='https://www.facebook.com' class='card'>فيسبوك</a>" +
-                "<a href='https://www.instagram.com' class='card'>إنستجرام</a>" +
-                "<a href='https://m.youtube.com' class='card'>يوتيوب</a>" +
-                "<a href='https://www.threads.net' class='card'>ثريد</a>" +
-                "<a href='https://x.com' class='card'>تويتر / X</a>" +
+                "<a href='https://www.tiktok.com' class='card'>" +
+                "<img src='https://assets.stickpng.com/images/5cb78671a7c7755bf004c14b.png' style='background:#000;' alt='TikTok'>" +
+                "<span>تيك توك</span></a>" +
+                "<a href='https://www.facebook.com' class='card'>" +
+                "<img src='https://upload.wikimedia.org/wikipedia/commons/0/05/Facebook_Logo_%282019%29.png' alt='Facebook'>" +
+                "<span>فيسبوك</span></a>" +
+                "<a href='https://www.instagram.com' class='card'>" +
+                "<img src='https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png' alt='Instagram'>" +
+                "<span>إنستجرام</span></a>" +
+                "<a href='https://m.youtube.com' class='card'>" +
+                "<img src='https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png' alt='YouTube'>" +
+                "<span>يوتيوب</span></a>" +
+                "<a href='https://www.threads.net' class='card'>" +
+                "<img src='https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/Threads_%28app%29_logo.svg/1024px-Threads_%28app%29_logo.svg.png' style='background:#000;padding:2px;' alt='Threads'>" +
+                "<span>ثريدز</span></a>" +
+                "<a href='https://x.com' class='card'>" +
+                "<img src='https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg' style='background:#000;padding:4px;' alt='X'>" +
+                "<span>تويتر / X</span></a>" +
                 customCards.toString() +
                 "</div>" +
                 "<div class='add-btn' onclick='promptAddSite()'>➕ إضافة موقع جديد للرئيسية</div>" +
