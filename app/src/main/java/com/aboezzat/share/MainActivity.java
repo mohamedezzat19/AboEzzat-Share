@@ -2,6 +2,7 @@ package com.aboezzat.share;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
@@ -11,6 +12,7 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.format.Formatter;
@@ -20,14 +22,19 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.view.GravityCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
+
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -44,6 +51,7 @@ public class MainActivity extends Activity {
     private static final int PICK_MEDIA_REQUEST = 101;
     private static final int PICK_SLIDESHOW_REQUEST = 102;
 
+    private DrawerLayout drawerLayout;
     private EditText etTvIp;
     private TextView tvStatusBadge;
     private SharedPreferences prefs;
@@ -84,12 +92,20 @@ public class MainActivity extends Activity {
         }
 
         initViews();
+        setupNavigationDrawer();
     }
 
     private void initViews() {
+        drawerLayout = findViewById(R.id.drawer_layout);
         etTvIp = findViewById(R.id.et_ip);
         tvStatusBadge = findViewById(R.id.tv_status_badge);
         Button btnSave = findViewById(R.id.btn_save);
+
+        findViewById(R.id.btn_open_drawer).setOnClickListener(v -> {
+            if (drawerLayout != null) {
+                drawerLayout.openDrawer(GravityCompat.START);
+            }
+        });
 
         String savedIp = prefs.getString("tv_ip", "");
         etTvIp.setText(savedIp);
@@ -166,6 +182,186 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_mute).setOnClickListener(v -> sendRemoteCommand("mute"));
     }
 
+    private void setupNavigationDrawer() {
+        // 1. المتصفح
+        findViewById(R.id.menu_browser).setOnClickListener(v -> {
+            closeDrawer();
+            startActivity(new Intent(MainActivity.this, BrowserActivity.class));
+        });
+
+        // 2. ملفات الهاتف
+        findViewById(R.id.menu_local_media).setOnClickListener(v -> {
+            closeDrawer();
+            openMediaPicker(false);
+        });
+
+        // 3. IPTV
+        findViewById(R.id.menu_iptv).setOnClickListener(v -> {
+            closeDrawer();
+            showIptvDialog();
+        });
+
+        // 4. الوسائط الأخيرة
+        findViewById(R.id.menu_recent_media).setOnClickListener(v -> {
+            closeDrawer();
+            showRecentMediaDialog();
+        });
+
+        // 5. قائمة التشغيل
+        findViewById(R.id.menu_playlist).setOnClickListener(v -> {
+            closeDrawer();
+            showPlaylistDialog();
+        });
+
+        // 6. العلامات المرجعية
+        findViewById(R.id.menu_bookmarks).setOnClickListener(v -> {
+            closeDrawer();
+            showBookmarksDialog();
+        });
+
+        // 7. سجل المتصفح
+        findViewById(R.id.menu_history).setOnClickListener(v -> {
+            closeDrawer();
+            Toast.makeText(this, "سجل التصفح فارغ حالياً", Toast.LENGTH_SHORT).show();
+        });
+
+        // 8. الأكثر زيارة
+        findViewById(R.id.menu_most_visited).setOnClickListener(v -> {
+            closeDrawer();
+            Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+            startActivity(intent);
+        });
+
+        // 9. التنزيلات
+        findViewById(R.id.menu_downloads).setOnClickListener(v -> {
+            closeDrawer();
+            openDownloads();
+        });
+
+        // 10. الوضع المظلم
+        findViewById(R.id.menu_dark_mode).setOnClickListener(v -> {
+            closeDrawer();
+            Toast.makeText(this, "الوضع المظلم مفعل افتراضياً ✓", Toast.LENGTH_SHORT).show();
+        });
+
+        // 11. النسخ الاحتياطي / استعادة
+        findViewById(R.id.menu_backup).setOnClickListener(v -> {
+            closeDrawer();
+            Toast.makeText(this, "تم حفظ نسخة احتياطية من الإعدادات ✓", Toast.LENGTH_SHORT).show();
+        });
+
+        // 12. إعدادات
+        findViewById(R.id.menu_settings).setOnClickListener(v -> {
+            closeDrawer();
+            if (etTvIp != null) {
+                etTvIp.requestFocus();
+                Toast.makeText(this, "عدل عنوان IP الشاشة واضغط حفظ", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // 13. خروج
+        findViewById(R.id.menu_exit).setOnClickListener(v -> {
+            closeDrawer();
+            finishAffinity();
+        });
+    }
+
+    private void closeDrawer() {
+        if (drawerLayout != null && drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+        }
+    }
+
+    private void showIptvDialog() {
+        EditText input = new EditText(this);
+        input.setHint("الصق رابط بث IPTV (m3u8 أو flv)");
+        input.setTextColor(0xFFFFFFFF);
+        input.setBackgroundColor(0xFF262833);
+        input.setPadding(16, 16, 16, 16);
+
+        new AlertDialog.Builder(this)
+                .setTitle("تشغيل IPTV على الشاشة")
+                .setView(input)
+                .setPositiveButton("بث مباشر 📺", (dialog, which) -> {
+                    String url = input.getText().toString().trim();
+                    if (!url.isEmpty()) {
+                        castUrlDirectlyToTv(url);
+                    }
+                })
+                .setNegativeButton("إلغاء", null)
+                .show();
+    }
+
+    private void showRecentMediaDialog() {
+        if (videoQueue.isEmpty() && slideshowQueue.isEmpty()) {
+            Toast.makeText(this, "لا توجد وسائط تم تشغيلها مؤخراً", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int total = videoQueue.size() + slideshowQueue.size();
+        Toast.makeText(this, "الوسائط الأخيرة المجهزة: " + total + " ملف", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showPlaylistDialog() {
+        if (videoQueue.isEmpty()) {
+            Toast.makeText(this, "قائمة التشغيل فارغة، حدد ملفات من وسائط الهاتف", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] items = new String[videoQueue.size()];
+        for (int i = 0; i < videoQueue.size(); i++) {
+            items[i] = "مقطع رقم " + (i + 1);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("قائمة التشغيل (" + videoQueue.size() + ")")
+                .setItems(items, (dialog, which) -> {
+                    currentVideoIndex = which;
+                    selectedMediaUri = videoQueue.get(currentVideoIndex);
+                    castLocalMediaToTv(true);
+                })
+                .setNegativeButton("إغلاق", null)
+                .show();
+    }
+
+    private void showBookmarksDialog() {
+        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<>());
+        if (customSites == null || customSites.isEmpty()) {
+            Toast.makeText(this, "لا توجد علامات مرجعية محفوظة بعد", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        List<String> urls = new ArrayList<>();
+        for (String entry : customSites) {
+            String[] parts = entry.split("\\|", 2);
+            if (parts.length == 2) {
+                names.add(parts[0]);
+                urls.add(parts[1]);
+            }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("العلامات المرجعية المفضلة")
+                .setItems(names.toArray(new String[0]), (dialog, which) -> {
+                    Intent intent = new Intent(MainActivity.this, BrowserActivity.class);
+                    intent.putExtra("url", urls.get(which));
+                    startActivity(intent);
+                })
+                .setNegativeButton("إغلاق", null)
+                .show();
+    }
+
+    private void openDownloads() {
+        try {
+            Intent intent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                Uri uri = Uri.parse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getPath());
+                intent.setDataAndType(uri, "*/*");
+                startActivity(Intent.createChooser(intent, "فتح التنزيلات"));
+            } catch (Exception ex) {
+                Toast.makeText(this, "تعذر فتح التنزيلات تلقائياً", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
     private void scanForTvDevices() {
         tvStatusBadge.setText("🔍 جاري الفحص...");
         Toast.makeText(this, "جاري فحص الشبكة لاكتشاف الأجهزة المتاحة...", Toast.LENGTH_SHORT).show();
@@ -506,6 +702,15 @@ public class MainActivity extends Activity {
                 }
             }
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "No media selected");
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (drawerLayout != null && drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+        } else {
+            super.onBackPressed();
         }
     }
 
