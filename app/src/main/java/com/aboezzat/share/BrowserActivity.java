@@ -125,7 +125,7 @@ public class BrowserActivity extends Activity {
             "doubleclick.net", "googleads", "pagead2", "adservice.google",
             "googletagmanager", "adcolony", "criteo", "adnxs", "outbrain",
             "taboola", "popads", "popcash", "propellerads", "adsterra",
-            "exoclick", "yandex.ru/ads", "smartadserver", "scorecardresearch",
+            "exoclick", "smartadserver", "scorecardresearch",
             "zedo", "adroll", "pubmatic", "rubiconproject"
     );
 
@@ -297,7 +297,8 @@ public class BrowserActivity extends Activity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
 
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36");
+        // User-Agent رسمي كامل مطابق للمتصفحات لفتح تيك توك لايف بدون تسجيل دخول
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Mobile; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36");
         settings.setGeolocationEnabled(true);
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -319,6 +320,7 @@ public class BrowserActivity extends Activity {
                         progressBar.setVisibility(View.GONE);
                     }
                 }
+                injectAdKiller(view);
             }
 
             @Override
@@ -375,6 +377,12 @@ public class BrowserActivity extends Activity {
         });
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String loadedUrl, boolean isReload) {
+                super.doUpdateVisitedHistory(view, loadedUrl, isReload);
+                injectAdKiller(view);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
@@ -450,48 +458,7 @@ public class BrowserActivity extends Activity {
                     etUrl.setText(loadedUrl.equals("about:home") ? "" : loadedUrl);
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
-
-                String adBlockAndSniffJs = "javascript:(function(){" +
-                        "  var style = document.createElement('style');" +
-                        "  style.innerHTML = '.ytp-ad-overlay-container, .ytp-ad-message-container, " +
-                        "                     ytd-promoted-sparkles-web-renderer, ytd-banner-promo-renderer, " +
-                        "                     ytd-ad-slot-renderer, .ad-container, .ad-div, " +
-                        "                     [id^=\"google_ads_\"], iframe[src*=\"doubleclick\"] { display: none !important; }';" +
-                        "  document.head.appendChild(style);" +
-                        "  if (!window.AboEzzatAdKiller) {" +
-                        "    window.AboEzzatAdKiller = setInterval(function(){" +
-                        "      try {" +
-                        "        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');" +
-                        "        if (skipBtn) { skipBtn.click(); }" +
-                        "        var adVideo = document.querySelector('video.ad-interrupting, .ad-showing video');" +
-                        "        if (adVideo && !isNaN(adVideo.duration)) {" +
-                        "          adVideo.currentTime = adVideo.duration;" +
-                        "          adVideo.play();" +
-                        "        }" +
-                        "      } catch(e) {}" +
-                        "    }, 300);" +
-                        "  }" +
-                        "  try{" +
-                        "    var title = ''; var poster = '';" +
-                        "    var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
-                        "    if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
-                        "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
-                        "    if(metaImg && metaImg.content){ poster = metaImg.content; }" +
-                        "    window.AboEzzatBridge.onMetaFound(title, poster);" +
-                        "  }catch(e){}" +
-                        "  try{" +
-                        "    var origPlay = HTMLMediaElement.prototype.play;" +
-                        "    HTMLMediaElement.prototype.play = function(){" +
-                        "      var src = this.currentSrc || this.src;" +
-                        "      if(src && src.indexOf('http') === 0 && !this.classList.contains('ad-interrupting')){" +
-                        "        window.AboEzzatBridge.onVideoPlayingWithPoster(src, '', '');" +
-                        "      }" +
-                        "      return origPlay.apply(this, arguments);" +
-                        "    };" +
-                        "  }catch(e){}" +
-                        "})()";
-
-                view.loadUrl(adBlockAndSniffJs);
+                injectAdKiller(view);
             }
         });
 
@@ -505,6 +472,59 @@ public class BrowserActivity extends Activity {
         } else {
             loadTargetUrl(url);
         }
+    }
+
+    private void injectAdKiller(WebView view) {
+        String adBlockAndSniffJs = "javascript:(function(){" +
+                "  try {" +
+                "    var style = document.getElementById('abo-ezzat-adblock');" +
+                "    if(!style){" +
+                "      style = document.createElement('style');" +
+                "      style.id = 'abo-ezzat-adblock';" +
+                "      style.innerHTML = '.ytp-ad-overlay-container, .ytp-ad-message-container, " +
+                "                         ytd-promoted-sparkles-web-renderer, ytd-banner-promo-renderer, " +
+                "                         ytd-ad-slot-renderer, .ad-container, .ad-div, ytd-in-feed-ad-layout-renderer, " +
+                "                         ytm-promoted-sparkles-web-renderer, .ytp-ad-action-interstitial, " +
+                "                         [id^=\"google_ads_\"], iframe[src*=\"doubleclick\"] { display: none !important; width:0px!important; height:0px!important; }';" +
+                "      document.head.appendChild(style);" +
+                "    }" +
+                "  } catch(e){}" +
+                "  if (!window.AboEzzatKillerLoop) {" +
+                "    window.AboEzzatKillerLoop = setInterval(function(){" +
+                "      try {" +
+                "        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .videoAdUiSkipButton');" +
+                "        if (skipBtn) { skipBtn.click(); }" +
+                "        var adVideos = document.querySelectorAll('video');" +
+                "        for(var i=0; i<adVideos.length; i++){" +
+                "          var v = adVideos[i];" +
+                "          if (document.querySelector('.ad-interrupting, .ad-showing') || v.classList.contains('ad-interrupting')) {" +
+                "            v.muted = true;" +
+                "            if(!isNaN(v.duration) && v.duration > 0){ v.currentTime = v.duration + 1; }" +
+                "          }" +
+                "        }" +
+                "      } catch(e) {}" +
+                "    }, 200);" +
+                "  }" +
+                "  try{" +
+                "    var title = ''; var poster = '';" +
+                "    var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
+                "    if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
+                "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                "    if(metaImg && metaImg.content){ poster = metaImg.content; }" +
+                "    window.AboEzzatBridge.onMetaFound(title, poster);" +
+                "  }catch(e){}" +
+                "  try{" +
+                "    var origPlay = HTMLMediaElement.prototype.play;" +
+                "    HTMLMediaElement.prototype.play = function(){" +
+                "      var src = this.currentSrc || this.src;" +
+                "      if(src && src.indexOf('http') === 0 && !this.classList.contains('ad-interrupting')){" +
+                "        window.AboEzzatBridge.onVideoPlayingWithPoster(src, '', '');" +
+                "      }" +
+                "      return origPlay.apply(this, arguments);" +
+                "    };" +
+                "  }catch(e){}" +
+                "})()";
+        view.evaluateJavascript(adBlockAndSniffJs, null);
     }
     private class JsBridge {
         @JavascriptInterface
@@ -700,13 +720,14 @@ public class BrowserActivity extends Activity {
             }
         }
 
+        // شعارات SVG مدمجة ومباشرة لا تتأثر بالنت ولا تنكسر أبداً
         String homeHtml = "<html dir='rtl'><head><meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
                 "<style>" +
                 "body{background:#121212;color:white;font-family:sans-serif;text-align:center;padding:15px;margin:0;}" +
                 ".grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:14px;margin-top:20px;}" +
-                ".card{background:#1E1E1E;padding:12px 6px;border-radius:12px;text-decoration:none;color:white;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #2A2A2A;transition:transform 0.2s;}" +
+                ".card{background:#1E1E1E;padding:12px 6px;border-radius:12px;text-decoration:none;color:white;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #2A2A2A;}" +
                 ".card:active{transform:scale(0.95);background:#252525;}" +
-                ".card img{width:42px;height:42px;border-radius:10px;margin-bottom:8px;object-fit:cover;}" +
+                ".card img, .card svg{width:42px;height:42px;border-radius:10px;margin-bottom:8px;object-fit:cover;}" +
                 ".card span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;font-weight:bold;}" +
                 ".icon-circle{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:8px;}" +
                 ".add-btn{background:#00897B;padding:12px;border-radius:10px;color:white;display:block;margin-top:22px;text-decoration:none;font-weight:bold;cursor:pointer;border:1px solid #00A896;}" +
@@ -719,26 +740,40 @@ public class BrowserActivity extends Activity {
                 "<input type='text' name='q' class='search-box' placeholder='ابحث في جوجل مصر...'>" +
                 "</form>" +
                 "<div class='grid'>" +
+
+                // 1. تيك توك بشعار SVG داخلي
                 "<a href='https://www.tiktok.com' class='card'>" +
-                "<img src='https://assets.stickpng.com/images/5cb78671a7c7755bf004c14b.png' style='background:#000;' alt='TikTok'>" +
+                "<div class='icon-circle' style='background:#000;'><svg viewBox='0 0 24 24' width='28' height='28' fill='white'><path d='M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.29 0 .58.04.86.11V9.4a6.33 6.33 0 0 0-.86-.06 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V9.05a8.27 8.27 0 0 0 3.77.92V6.69z'/></svg></div>" +
                 "<span>تيك توك</span></a>" +
+
+                // 2. فيسبوك
                 "<a href='https://www.facebook.com' class='card'>" +
-                "<img src='https://upload.wikimedia.org/wikipedia/commons/0/05/Facebook_Logo_%282019%29.png' alt='Facebook'>" +
+                "<div class='icon-circle' style='background:#1877F2;'><svg viewBox='0 0 24 24' width='28' height='28' fill='white'><path d='M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z'/></svg></div>" +
                 "<span>فيسبوك</span></a>" +
+
+                // 3. إنستجرام
                 "<a href='https://www.instagram.com' class='card'>" +
-                "<img src='https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png' alt='Instagram'>" +
+                "<div class='icon-circle' style='background:linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%);'><svg viewBox='0 0 24 24' width='28' height='28' fill='white'><path d='M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z'/></svg></div>" +
                 "<span>إنستجرام</span></a>" +
+
+                // 4. يوتيوب
                 "<a href='https://m.youtube.com' class='card'>" +
-                "<img src='https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png' alt='YouTube'>" +
+                "<div class='icon-circle' style='background:#FF0000;'><svg viewBox='0 0 24 24' width='28' height='28' fill='white'><path d='M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z'/></svg></div>" +
                 "<span>يوتيوب</span></a>" +
+
+                // 5. ثريدز بشعار SVG مدمج
                 "<a href='https://www.threads.net' class='card'>" +
-                "<img src='https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/Threads_%28app%29_logo.svg/1024px-Threads_%28app%29_logo.svg.png' style='background:#000;padding:2px;' alt='Threads'>" +
+                "<div class='icon-circle' style='background:#000;'><svg viewBox='0 0 24 24' width='28' height='28' fill='white'><path d='M12.186 24h-.007c-3.581-.026-6.33-1.157-8.172-3.363-1.799-2.153-2.583-5.227-2.33-9.136.486-7.509 6.077-11.458 10.536-11.5 3.327-.008 6.037 1.096 8.055 3.284 1.954 2.119 2.946 5.105 2.949 8.877v.64h-3.667v-.64c-.002-2.82-.705-4.97-2.09-6.39-1.425-1.46-3.414-2.19-5.912-2.18-3.483.03-7.502 3.03-7.876 8.8-.204 3.14.375 5.51 1.724 7.04 1.343 1.52 3.375 2.3 6.038 2.32 2.502.02 4.492-.74 5.913-2.27.653-.7 1.127-1.57 1.41-2.58-1.58-.78-2.63-2.1-2.63-3.77 0-2.45 2.05-4.45 4.56-4.45 2.52 0 4.57 2 4.57 4.45 0 3.73-2.43 6.64-6.34 7.55-1.92.45-4.04.57-6.23.32z'/></svg></div>" +
                 "<span>ثريدز</span></a>" +
+
+                // 6. تويتر / X بشعار SVG مدمج
                 "<a href='https://x.com' class='card'>" +
-                "<img src='https://upload.wikimedia.org/wikipedia/commons/c/ce/X_logo_2023.svg' style='background:#000;padding:4px;' alt='X'>" +
+                "<div class='icon-circle' style='background:#000;'><svg viewBox='0 0 24 24' width='26' height='26' fill='white'><path d='M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z'/></svg></div>" +
                 "<span>تويتر / X</span></a>" +
+
                 customCards.toString() +
                 "</div>" +
+
                 "<div class='add-btn' onclick='promptAddSite()'>➕ إضافة موقع جديد للرئيسية</div>" +
                 "<script>" +
                 "function promptAddSite() {" +
