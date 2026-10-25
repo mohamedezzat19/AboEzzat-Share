@@ -36,6 +36,8 @@ import org.json.JSONObject;
 
 public class ShareActivity extends Activity {
 
+    private static final int TARGET_PORT = 8081;
+
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
@@ -94,14 +96,12 @@ public class ShareActivity extends Activity {
         return null;
     }
 
-    // فرز المنصات: كل منصة تعمل بمسار مستقل تماماً دون تدخل
     private void dispatchPlatformRoute(String url) {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         targetTvIp = prefs.getString("tv_ip", "").trim();
 
         String lowerUrl = url.toLowerCase();
 
-        // 1. إنستجرام: يفتح المتصفح فوراً دون قناص
         if (lowerUrl.contains("instagram.com")) {
             Intent browserIntent = new Intent(this, BrowserActivity.class);
             browserIntent.setAction(Intent.ACTION_VIEW);
@@ -117,27 +117,23 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 2. يوتيوب: إرسال فوري مباشر
         if (lowerUrl.contains("youtube.com") || lowerUrl.contains("youtu.be")) {
             sendToTv(targetTvIp, url, false);
             return;
         }
 
-        // 3. تيك توك: العادي عبر API السريع
         if (lowerUrl.contains("tiktok.com") && !lowerUrl.contains("/live") && !lowerUrl.contains("live.tiktok.com")) {
             Toast.makeText(this, "جاري استخراج فيديو تيك توك...", Toast.LENGTH_SHORT).show();
             handleTikTok(url);
             return;
         }
 
-        // 4. ثريدز (Threads): قناص صامت خفيف للشاشة خبط لزق
         if (lowerUrl.contains("threads.net")) {
             Toast.makeText(this, "جاري قنص ثريد للشاشة مباشرة...", Toast.LENGTH_SHORT).show();
             startPlatformSniffer(url, "threads");
             return;
         }
 
-        // 5. تويتر (X) وفيسبوك ولايف تيك توك
         Toast.makeText(this, "جاري قنص الفيديو للشاشة...", Toast.LENGTH_SHORT).show();
         startPlatformSniffer(url, "generic");
     }
@@ -186,7 +182,6 @@ public class ShareActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        // User-Agent الأصلي الخفيف المعتمد
         settings.setUserAgentString("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36");
 
         webView.addJavascriptInterface(new Object() {
@@ -248,13 +243,11 @@ public class ShareActivity extends Activity {
 
         boolean matched = false;
 
-        // مسار خاص لثريدز: قنص رابط MP4 الصافي
         if ("threads".equals(platformType)) {
             if (lower.contains(".mp4") || lower.contains("video_playback") || (lower.contains("cdninstagram.com") && lower.contains("/v/"))) {
                 matched = true;
             }
         } else {
-            // المسار العام للفيسبوك وتويتر وبثوث لايف تيك توك
             if ((lower.contains("pull-") && lower.contains("tiktokcdn.com")) ||
                 (lower.contains("tiktokcdn.com") && (lower.contains(".flv") || lower.contains(".m3u8"))) ||
                 lower.contains(".mp4") || lower.contains(".m3u8") ||
@@ -285,8 +278,8 @@ public class ShareActivity extends Activity {
             if (!tvIp.startsWith("http://") && !tvIp.startsWith("https://")) {
                 tvIp = "http://" + tvIp;
             }
-            if (!tvIp.contains(":8080")) {
-                tvIp = tvIp + ":8080";
+            if (!tvIp.contains(":" + TARGET_PORT)) {
+                tvIp = tvIp + ":" + TARGET_PORT;
             }
 
             String paramName = isQueue ? "queue" : "url";
