@@ -123,7 +123,10 @@ public class BrowserActivity extends Activity {
 
     private final List<String> adDomains = Arrays.asList(
             "doubleclick.net", "googleads", "pagead2", "adservice.google",
-            "googletagmanager", "adcolony", "criteo", "adnxs", "outbrain", "taboola"
+            "googletagmanager", "adcolony", "criteo", "adnxs", "outbrain",
+            "taboola", "popads", "popcash", "propellerads", "adsterra",
+            "exoclick", "yandex.ru/ads", "smartadserver", "scorecardresearch",
+            "zedo", "adroll", "pubmatic", "rubiconproject"
     );
 
     @Override
@@ -155,12 +158,7 @@ public class BrowserActivity extends Activity {
         btnMenu.setTextColor(Color.WHITE);
         btnMenu.setBackgroundColor(Color.TRANSPARENT);
         btnMenu.setTextSize(20);
-        btnMenu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showSideMenu();
-            }
-        });
+        btnMenu.setOnClickListener(v -> showSideMenu());
         topBar.addView(btnMenu, new LinearLayout.LayoutParams(95, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         etUrl = new EditText(this);
@@ -173,12 +171,9 @@ public class BrowserActivity extends Activity {
         etUrl.setPadding(15, 10, 15, 10);
         LinearLayout.LayoutParams urlParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
         urlParams.setMargins(5, 0, 5, 0);
-        etUrl.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
-                loadTargetUrl(etUrl.getText().toString().trim());
-                return true;
-            }
+        etUrl.setOnEditorActionListener((v, actionId, event) -> {
+            loadTargetUrl(etUrl.getText().toString().trim());
+            return true;
         });
         topBar.addView(etUrl, urlParams);
 
@@ -187,12 +182,7 @@ public class BrowserActivity extends Activity {
         btnSniff.setTextSize(16);
         btnSniff.setTextColor(Color.WHITE);
         btnSniff.setBackgroundColor(Color.parseColor("#D32F2F"));
-        btnSniff.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                triggerManualSniff();
-            }
-        });
+        btnSniff.setOnClickListener(v -> triggerManualSniff());
         LinearLayout.LayoutParams sniffParams = new LinearLayout.LayoutParams(95, ViewGroup.LayoutParams.WRAP_CONTENT);
         sniffParams.setMargins(0, 5, 5, 0);
         topBar.addView(btnSniff, sniffParams);
@@ -203,12 +193,7 @@ public class BrowserActivity extends Activity {
         btnCast.setTextColor(Color.BLACK);
         btnCast.setBackgroundColor(Color.parseColor("#FFC107"));
         btnCast.setVisibility(View.GONE);
-        btnCast.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showMediaListDialog();
-            }
-        });
+        btnCast.setOnClickListener(v -> showMediaListDialog());
         topBar.addView(btnCast, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         rootLayout.addView(topBar);
@@ -237,35 +222,19 @@ public class BrowserActivity extends Activity {
         bottomBar.setPadding(10, 5, 10, 5);
         bottomBar.setGravity(Gravity.CENTER);
 
-        bottomBar.addView(createBottomButton("◀", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                WebView currentWeb = getCurrentWebView();
-                if (currentWeb != null && currentWeb.canGoBack()) currentWeb.goBack();
-            }
+        bottomBar.addView(createBottomButton("◀", v -> {
+            WebView currentWeb = getCurrentWebView();
+            if (currentWeb != null && currentWeb.canGoBack()) currentWeb.goBack();
         }));
 
-        bottomBar.addView(createBottomButton("▶", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                WebView currentWeb = getCurrentWebView();
-                if (currentWeb != null && currentWeb.canGoForward()) currentWeb.goForward();
-            }
+        bottomBar.addView(createBottomButton("▶", v -> {
+            WebView currentWeb = getCurrentWebView();
+            if (currentWeb != null && currentWeb.canGoForward()) currentWeb.goForward();
         }));
 
-        bottomBar.addView(createBottomButton("🏠", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                loadHomePage();
-            }
-        }));
+        bottomBar.addView(createBottomButton("🏠", v -> loadHomePage()));
 
-        btnTabs = createBottomButton("[ 1 ]", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showTabsDialog();
-            }
-        });
+        btnTabs = createBottomButton("[ 1 ]", v -> showTabsDialog());
         bottomBar.addView(btnTabs);
 
         rootLayout.addView(bottomBar);
@@ -301,19 +270,16 @@ public class BrowserActivity extends Activity {
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
         webView.requestFocus(View.FOCUS_DOWN);
-        webView.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                    case MotionEvent.ACTION_UP:
-                        if (!v.hasFocus()) {
-                            v.requestFocus();
-                        }
-                        break;
-                }
-                return false;
+        webView.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_UP:
+                    if (!v.hasFocus()) {
+                        v.requestFocus();
+                    }
+                    break;
             }
+            return false;
         });
 
         WebSettings settings = webView.getSettings();
@@ -321,6 +287,9 @@ public class BrowserActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
+
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
 
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
@@ -359,12 +328,7 @@ public class BrowserActivity extends Activity {
 
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        request.grant(request.getResources());
-                    }
-                });
+                runOnUiThread(() -> request.grant(request.getResources()));
             }
 
             @Override
@@ -414,7 +378,11 @@ public class BrowserActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String targetUrl = request.getUrl().toString();
-                if (targetUrl.contains("onelink.me") || targetUrl.contains("snssdk") || targetUrl.startsWith("intent://") || !targetUrl.startsWith("http")) {
+                String lower = targetUrl.toLowerCase();
+
+                if (lower.contains("popads") || lower.contains("bet365") || lower.contains("redirect") ||
+                    targetUrl.contains("onelink.me") || targetUrl.contains("snssdk") || 
+                    targetUrl.startsWith("intent://") || (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://"))) {
                     return true;
                 }
                 return false;
@@ -433,7 +401,8 @@ public class BrowserActivity extends Activity {
 
                 boolean isJunk = lowerUrl.contains(".ts") || lowerUrl.contains("seg-") ||
                                  lowerUrl.contains(".js") || lowerUrl.contains(".css") ||
-                                 lowerUrl.contains("preview") || lowerUrl.contains("rsrc.php");
+                                 lowerUrl.contains("preview") || lowerUrl.contains("rsrc.php") ||
+                                 lowerUrl.contains("google_ads") || lowerUrl.contains("ad-interrupting");
 
                 if (!isJunk) {
                     if (lowerUrl.contains(".mp4") || lowerUrl.contains(".flv") || 
@@ -482,26 +451,47 @@ public class BrowserActivity extends Activity {
                     tabTitles.set(currentTabIndex, view.getTitle() != null ? view.getTitle() : "علامة تبويب");
                 }
 
-                String js = "javascript:(function(){" +
-                        "try{" +
-                        "  var title = '';" +
-                        "  var poster = '';" +
-                        "  var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
-                        "  if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
-                        "  var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
-                        "  if(metaImg && metaImg.content){ poster = metaImg.content; }" +
-                        "  window.AboEzzatBridge.onMetaFound(title, poster);" +
-                        "}catch(e){}" +
-                        "try{" +
-                        "  var origPlay = HTMLMediaElement.prototype.play;" +
-                        "  HTMLMediaElement.prototype.play = function(){" +
-                        "    var src = this.currentSrc || this.src;" +
-                        "    if(src && src.indexOf('http') === 0){ window.AboEzzatBridge.onVideoPlayingWithPoster(src, '', ''); }" +
-                        "    return origPlay.apply(this, arguments);" +
-                        "  };" +
-                        "}catch(e){}" +
+                String adBlockAndSniffJs = "javascript:(function(){" +
+                        "  var style = document.createElement('style');" +
+                        "  style.innerHTML = '.ytp-ad-overlay-container, .ytp-ad-message-container, " +
+                        "                     ytd-promoted-sparkles-web-renderer, ytd-banner-promo-renderer, " +
+                        "                     ytd-ad-slot-renderer, .ad-container, .ad-div, " +
+                        "                     [id^=\"google_ads_\"], iframe[src*=\"doubleclick\"] { display: none !important; }';" +
+                        "  document.head.appendChild(style);" +
+                        "  if (!window.AboEzzatAdKiller) {" +
+                        "    window.AboEzzatAdKiller = setInterval(function(){" +
+                        "      try {" +
+                        "        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');" +
+                        "        if (skipBtn) { skipBtn.click(); }" +
+                        "        var adVideo = document.querySelector('video.ad-interrupting, .ad-showing video');" +
+                        "        if (adVideo && !isNaN(adVideo.duration)) {" +
+                        "          adVideo.currentTime = adVideo.duration;" +
+                        "          adVideo.play();" +
+                        "        }" +
+                        "      } catch(e) {}" +
+                        "    }, 300);" +
+                        "  }" +
+                        "  try{" +
+                        "    var title = ''; var poster = '';" +
+                        "    var metaTitle = document.querySelector('meta[property=\"og:title\"], meta[name=\"twitter:title\"]');" +
+                        "    if(metaTitle && metaTitle.content){ title = metaTitle.content; }" +
+                        "    var metaImg = document.querySelector('meta[property=\"og:image\"], meta[name=\"twitter:image\"]');" +
+                        "    if(metaImg && metaImg.content){ poster = metaImg.content; }" +
+                        "    window.AboEzzatBridge.onMetaFound(title, poster);" +
+                        "  }catch(e){}" +
+                        "  try{" +
+                        "    var origPlay = HTMLMediaElement.prototype.play;" +
+                        "    HTMLMediaElement.prototype.play = function(){" +
+                        "      var src = this.currentSrc || this.src;" +
+                        "      if(src && src.indexOf('http') === 0 && !this.classList.contains('ad-interrupting')){" +
+                        "        window.AboEzzatBridge.onVideoPlayingWithPoster(src, '', '');" +
+                        "      }" +
+                        "      return origPlay.apply(this, arguments);" +
+                        "    };" +
+                        "  }catch(e){}" +
                         "})()";
-                view.loadUrl(js);
+
+                view.loadUrl(adBlockAndSniffJs);
             }
         });
 
@@ -564,12 +554,7 @@ public class BrowserActivity extends Activity {
         @JavascriptInterface
         public void onNewCustomSite(String name, String siteUrl) {
             saveCustomSite(name, siteUrl);
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    loadHomePage();
-                }
-            });
+            runOnUiThread(() -> loadHomePage());
         }
     }
 
@@ -597,18 +582,15 @@ public class BrowserActivity extends Activity {
             loadThumbnailAsync(newMedia);
         }
 
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                btnCast.setVisibility(View.VISIBLE);
-                btnCast.setText("📺 " + capturedList.size());
+        runOnUiThread(() -> {
+            btnCast.setVisibility(View.VISIBLE);
+            btnCast.setText("📺 " + capturedList.size());
 
-                Animation blink = new AlphaAnimation(0.3f, 1.0f);
-                blink.setDuration(350);
-                blink.setRepeatMode(Animation.REVERSE);
-                blink.setRepeatCount(4);
-                btnCast.startAnimation(blink);
-            }
+            Animation blink = new AlphaAnimation(0.3f, 1.0f);
+            blink.setDuration(350);
+            blink.setRepeatMode(Animation.REVERSE);
+            blink.setRepeatCount(4);
+            btnCast.startAnimation(blink);
         });
     }
 
@@ -633,19 +615,17 @@ public class BrowserActivity extends Activity {
             }
         }
     }
+
     private void loadThumbnailAsync(final CapturedMedia media) {
-        AsyncTask.execute(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    URL u = new URL(media.posterUrl);
-                    HttpURLConnection conn = (HttpURLConnection) u.openConnection();
-                    conn.setDoInput(true);
-                    conn.connect();
-                    InputStream input = conn.getInputStream();
-                    media.posterBitmap = BitmapFactory.decodeStream(input);
-                } catch (Exception ignored) {}
-            }
+        AsyncTask.execute(() -> {
+            try {
+                URL u = new URL(media.posterUrl);
+                HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+                conn.setDoInput(true);
+                conn.connect();
+                InputStream input = conn.getInputStream();
+                media.posterBitmap = BitmapFactory.decodeStream(input);
+            } catch (Exception ignored) {}
         });
     }
 
@@ -689,7 +669,7 @@ public class BrowserActivity extends Activity {
         }
         etUrl.setText(target);
 
-        Map<String, String> extraHeaders = new HashMap<String, String>();
+        Map<String, String> extraHeaders = new HashMap<>();
         extraHeaders.put("Accept-Language", "ar-EG,ar;q=0.9,en-US;q=0.8");
 
         current.loadUrl(target, extraHeaders);
@@ -705,7 +685,7 @@ public class BrowserActivity extends Activity {
         etUrl.setText("");
 
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
-        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<String>());
+        Set<String> customSites = prefs.getStringSet("custom_sites", new HashSet<>());
 
         StringBuilder customCards = new StringBuilder();
         if (customSites != null) {
@@ -755,7 +735,7 @@ public class BrowserActivity extends Activity {
 
     private void saveCustomSite(String name, String url) {
         SharedPreferences prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
-        Set<String> set = new HashSet<String>(prefs.getStringSet("custom_sites", new HashSet<String>()));
+        Set<String> set = new HashSet<>(prefs.getStringSet("custom_sites", new HashSet<>()));
         set.add(name + "|" + url);
         prefs.edit().putStringSet("custom_sites", set).apply();
     }
@@ -785,7 +765,7 @@ public class BrowserActivity extends Activity {
                 "var vids = document.getElementsByTagName('video');" +
                 "for(var i=0; i<vids.length; i++){" +
                 "  var src = vids[i].currentSrc || vids[i].src;" +
-                "  if(src && src.indexOf('http') === 0){" +
+                "  if(src && src.indexOf('http') === 0 && !vids[i].classList.contains('ad-interrupting')){" +
                 "    window.AboEzzatBridge.onVideoPlayingWithPoster(src, title || document.title, poster);" +
                 "  }" +
                 "}" +
@@ -890,12 +870,9 @@ public class BrowserActivity extends Activity {
                 }
                 row.addView(thumb);
 
-                row.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        dialog.dismiss();
-                        showMediaOptionsDialog(item);
-                    }
+                row.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    showMediaOptionsDialog(item);
                 });
 
                 return row;
@@ -909,12 +886,9 @@ public class BrowserActivity extends Activity {
         btnCastNow.setTextColor(Color.BLACK);
         btnCastNow.setBackgroundColor(Color.parseColor("#FFD700"));
         btnCastNow.setTextSize(14);
-        btnCastNow.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                dialog.dismiss();
-                castSelectedTracksManually();
-            }
+        btnCastNow.setOnClickListener(v -> {
+            dialog.dismiss();
+            castSelectedTracksManually();
         });
         LinearLayout.LayoutParams btnCastParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         btnCastParams.setMargins(0, 10, 0, 5);
@@ -931,12 +905,9 @@ public class BrowserActivity extends Activity {
         btnDlVideo.setTextColor(Color.WHITE);
         btnDlVideo.setBackgroundColor(Color.parseColor("#2E7D32"));
         btnDlVideo.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        btnDlVideo.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                dialog.dismiss();
-                downloadSelectedMedia(false);
-            }
+        btnDlVideo.setOnClickListener(v -> {
+            dialog.dismiss();
+            downloadSelectedMedia(false);
         });
         dlRow.addView(btnDlVideo);
 
@@ -948,12 +919,9 @@ public class BrowserActivity extends Activity {
         btnDlAudio.setTextColor(Color.WHITE);
         btnDlAudio.setBackgroundColor(Color.parseColor("#E65100"));
         btnDlAudio.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-        btnDlAudio.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                dialog.dismiss();
-                downloadSelectedMedia(true);
-            }
+        btnDlAudio.setOnClickListener(v -> {
+            dialog.dismiss();
+            downloadSelectedMedia(true);
         });
         dlRow.addView(btnDlAudio);
 
@@ -963,14 +931,11 @@ public class BrowserActivity extends Activity {
         btnClear.setText("مسح القائمة");
         btnClear.setTextColor(Color.LTGRAY);
         btnClear.setBackgroundColor(Color.parseColor("#2A2A2A"));
-        btnClear.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                capturedList.clear();
-                btnCast.setText("📺 0");
-                btnCast.setVisibility(View.GONE);
-                dialog.dismiss();
-            }
+        btnClear.setOnClickListener(v -> {
+            capturedList.clear();
+            btnCast.setText("📺 0");
+            btnCast.setVisibility(View.GONE);
+            dialog.dismiss();
         });
         LinearLayout.LayoutParams btnClearParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         btnClearParams.setMargins(0, 5, 0, 0);
@@ -1069,7 +1034,7 @@ public class BrowserActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":8081")) endpoint += ":8081";
 
             String fullUrl = endpoint + "/?video=" + URLEncoder.encode(videoTrack, "UTF-8") 
                                       + "&audio=" + URLEncoder.encode(audioTrack, "UTF-8");
@@ -1099,18 +1064,15 @@ public class BrowserActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle(media.title)
-                .setItems(options, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        if (which == 0) {
-                            mergeAndCastToTv();
-                        } else if (which == 1) {
-                            castToTv(media.url);
-                        } else if (which == 2) {
-                            downloadMedia(media.url, false);
-                        } else if (which == 3) {
-                            downloadMedia(media.url, true);
-                        }
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        mergeAndCastToTv();
+                    } else if (which == 1) {
+                        castToTv(media.url);
+                    } else if (which == 2) {
+                        downloadMedia(media.url, false);
+                    } else if (which == 3) {
+                        downloadMedia(media.url, true);
                     }
                 })
                 .show();
@@ -1150,8 +1112,8 @@ public class BrowserActivity extends Activity {
             if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
                 endpoint = "http://" + endpoint;
             }
-            if (!endpoint.contains(":8080")) {
-                endpoint = endpoint + ":8080";
+            if (!endpoint.contains(":8081")) {
+                endpoint = endpoint + ":8081";
             }
 
             String fullUrl = endpoint + "/?video=" + URLEncoder.encode(videoTrackUrl, "UTF-8") 
@@ -1161,22 +1123,12 @@ public class BrowserActivity extends Activity {
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الاتصال", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الاتصال", Toast.LENGTH_SHORT).show());
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(BrowserActivity.this, "تم بدء العرض المدمج في الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تم بدء العرض المدمج في الشاشة بنجاح ✓", Toast.LENGTH_SHORT).show());
                 }
             });
         } catch (Exception e) {
@@ -1194,8 +1146,8 @@ public class BrowserActivity extends Activity {
             if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
                 endpoint = "http://" + endpoint;
             }
-            if (!endpoint.contains(":8080")) {
-                endpoint = endpoint + ":8080";
+            if (!endpoint.contains(":8081")) {
+                endpoint = endpoint + ":8081";
             }
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
@@ -1203,22 +1155,12 @@ public class BrowserActivity extends Activity {
             client.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الـ IP", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تعذر الإرسال للشاشة، تأكد من الـ IP", Toast.LENGTH_SHORT).show());
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(BrowserActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(BrowserActivity.this, "تم الإرسال والتشغيل بنجاح ✓", Toast.LENGTH_SHORT).show());
                 }
             });
         } catch (Exception e) {
@@ -1267,21 +1209,18 @@ public class BrowserActivity extends Activity {
         };
         new AlertDialog.Builder(this)
                 .setTitle("القائمة الجانبية")
-                .setItems(menuItems, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        if (which == 0) {
-                            WebView current = getCurrentWebView();
-                            if (current != null) current.reload();
-                        } else if (which == 1) {
-                            openDownloadsFolder();
-                        } else if (which == 2) {
-                            addNewTab("about:home");
-                        } else if (which == 3) {
-                            CookieManager.getInstance().removeAllCookies(null);
-                            CookieManager.getInstance().flush();
-                            Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
-                        }
+                .setItems(menuItems, (dialog, which) -> {
+                    if (which == 0) {
+                        WebView current = getCurrentWebView();
+                        if (current != null) current.reload();
+                    } else if (which == 1) {
+                        openDownloadsFolder();
+                    } else if (which == 2) {
+                        addNewTab("about:home");
+                    } else if (which == 3) {
+                        CookieManager.getInstance().removeAllCookies(null);
+                        CookieManager.getInstance().flush();
+                        Toast.makeText(BrowserActivity.this, "تم مسح الكوكيز بنجاح ✓", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .show();
@@ -1311,25 +1250,10 @@ public class BrowserActivity extends Activity {
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("علامات التبويب المفتوحة (" + tabList.size() + ")");
-        builder.setItems(titles, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                switchToTab(which);
-            }
-        });
-        builder.setPositiveButton("➕ علامة تبويب جديدة", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                addNewTab("about:home");
-            }
-        });
+        builder.setItems(titles, (dialog, which) -> switchToTab(which));
+        builder.setPositiveButton("➕ علامة تبويب جديدة", (dialog, which) -> addNewTab("about:home"));
         if (tabList.size() > 1) {
-            builder.setNegativeButton("✖ إغلاق التبويب الحالي", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    closeCurrentTab();
-                }
-            });
+            builder.setNegativeButton("✖ إغلاق التبويب الحالي", (dialog, which) -> closeCurrentTab());
         }
         builder.show();
     }
