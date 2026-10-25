@@ -1,6 +1,7 @@
 package com.aboezzat.share;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
@@ -39,6 +40,7 @@ import okhttp3.Response;
 
 public class MainActivity extends Activity {
 
+    private static final int TARGET_PORT = 8081;
     private static final int PICK_MEDIA_REQUEST = 101;
     private static final int PICK_SLIDESHOW_REQUEST = 102;
 
@@ -49,12 +51,10 @@ public class MainActivity extends Activity {
     private LocalMediaServer localServer;
     private Uri selectedMediaUri = null;
 
-    // طابور الصور المتتابعة
     private final List<Uri> slideshowQueue = new ArrayList<>();
     private int currentSlideIndex = 0;
     private boolean isSlideshowRunning = false;
 
-    // طابور الفيديوهات المتعددة
     private final List<Uri> videoQueue = new ArrayList<>();
     private int currentVideoIndex = 0;
 
@@ -97,7 +97,7 @@ public class MainActivity extends Activity {
             tvStatusBadge.setText("● متصل: " + savedIp);
         }
 
-        tvStatusBadge.setOnClickListener(v -> scanForTvIp());
+        tvStatusBadge.setOnClickListener(v -> scanForTvDevices());
 
         btnSave.setOnClickListener(v -> {
             String ip = etTvIp.getText().toString().trim();
@@ -114,7 +114,6 @@ public class MainActivity extends Activity {
         findViewById(R.id.card_local_media).setOnClickListener(v -> openMediaPicker(false));
         findViewById(R.id.card_slideshow).setOnClickListener(v -> openMediaPicker(true));
 
-        // زر التشغيل والإيقاف المؤقت المزدوج
         findViewById(R.id.btn_play_pause).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 if (isSlideshowRunning) {
@@ -131,11 +130,9 @@ public class MainActivity extends Activity {
             }
         });
 
-        // التقديم والتأخير 10 ثواني
         findViewById(R.id.btn_rewind).setOnClickListener(v -> sendRemoteCommand("rw"));
         findViewById(R.id.btn_forward).setOnClickListener(v -> sendRemoteCommand("ff"));
 
-        // زر التالي الذكي (يدعم الصور المتتابعة وفيديوهات الطابور والشاشة)
         findViewById(R.id.btn_next).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 currentSlideIndex = (currentSlideIndex + 1) % slideshowQueue.size();
@@ -150,7 +147,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // زر السابق الذكي
         findViewById(R.id.btn_prev).setOnClickListener(v -> {
             if (!slideshowQueue.isEmpty()) {
                 currentSlideIndex = (currentSlideIndex - 1 + slideshowQueue.size()) % slideshowQueue.size();
@@ -165,15 +161,14 @@ public class MainActivity extends Activity {
             }
         });
 
-        // أزرار التحكم بالصوت
         findViewById(R.id.btn_vol_up).setOnClickListener(v -> sendRemoteCommand("vol_up"));
         findViewById(R.id.btn_vol_down).setOnClickListener(v -> sendRemoteCommand("vol_down"));
         findViewById(R.id.btn_mute).setOnClickListener(v -> sendRemoteCommand("mute"));
     }
 
-    private void scanForTvIp() {
-        tvStatusBadge.setText("🔍 جاري البحث...");
-        Toast.makeText(this, "جاري فحص الشبكة لاكتشاف الشاشة...", Toast.LENGTH_SHORT).show();
+    private void scanForTvDevices() {
+        tvStatusBadge.setText("🔍 جاري الفحص...");
+        Toast.makeText(this, "جاري فحص الشبكة لاكتشاف الأجهزة المتاحة...", Toast.LENGTH_SHORT).show();
 
         AsyncTask.execute(() -> {
             String phoneIp = getDeviceIpAddress();
@@ -183,32 +178,42 @@ public class MainActivity extends Activity {
             }
 
             String subnet = phoneIp.substring(0, phoneIp.lastIndexOf(".") + 1);
-            String foundIp = null;
+            final List<String> availableDevices = new ArrayList<>();
 
             for (int i = 1; i < 255; i++) {
                 String testIp = subnet + i;
                 try {
                     Socket socket = new Socket();
-                    socket.connect(new InetSocketAddress(testIp, 8080), 35);
+                    socket.connect(new InetSocketAddress(testIp, TARGET_PORT), 35);
                     socket.close();
-                    foundIp = testIp;
-                    break;
+                    availableDevices.add(testIp);
                 } catch (Exception ignored) {}
             }
 
-            final String finalFound = foundIp;
             runOnUiThread(() -> {
-                if (finalFound != null) {
-                    etTvIp.setText(finalFound);
-                    prefs.edit().putString("tv_ip", finalFound).apply();
-                    tvStatusBadge.setText("● متصل: " + finalFound);
-                    Toast.makeText(MainActivity.this, "تم العثور على الشاشة وحفظها: " + finalFound, Toast.LENGTH_LONG).show();
+                if (!availableDevices.isEmpty()) {
+                    showDeviceSelectionDialog(availableDevices);
                 } else {
-                    tvStatusBadge.setText("● لم تكتشف");
-                    Toast.makeText(MainActivity.this, "تعذر كشف الشاشة تلقائياً، تأكد أنها متصلة", Toast.LENGTH_SHORT).show();
+                    tvStatusBadge.setText("● لم تكتشف أجهزة");
+                    Toast.makeText(MainActivity.this, "لم يتم العثور على أي جهاز فاتح منفذ 8081", Toast.LENGTH_LONG).show();
                 }
             });
         });
+    }
+
+    private void showDeviceSelectionDialog(final List<String> devices) {
+        String[] deviceArray = devices.toArray(new String[0]);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("اختر جهاز الاستقبال (منفذ 8081)");
+        builder.setItems(deviceArray, (dialog, which) -> {
+            String chosenIp = devices.get(which);
+            etTvIp.setText(chosenIp);
+            prefs.edit().putString("tv_ip", chosenIp).apply();
+            tvStatusBadge.setText("● متصل: " + chosenIp);
+            Toast.makeText(MainActivity.this, "تم اختيار وحفظ: " + chosenIp, Toast.LENGTH_SHORT).show();
+        });
+        builder.setNegativeButton("إلغاء", null);
+        builder.show();
     }
 
     @Override
@@ -237,7 +242,6 @@ public class MainActivity extends Activity {
 
     private void processSharedLink(String url) {
         String lowerUrl = url.toLowerCase();
-
         boolean isBrowserRequired = lowerUrl.contains("facebook.com") || lowerUrl.contains("fb.watch") || 
                                     lowerUrl.contains("fb.com") || lowerUrl.contains("instagram.com");
 
@@ -262,7 +266,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TARGET_PORT)) endpoint += ":" + TARGET_PORT;
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(mediaUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
@@ -403,7 +407,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TARGET_PORT)) endpoint += ":" + TARGET_PORT;
 
             String fullUrl = endpoint + "/?url=" + URLEncoder.encode(targetUrl, "UTF-8");
             Request req = new Request.Builder().url(fullUrl).build();
@@ -432,7 +436,7 @@ public class MainActivity extends Activity {
         try {
             String endpoint = tvIp;
             if (!endpoint.startsWith("http")) endpoint = "http://" + endpoint;
-            if (!endpoint.contains(":8080")) endpoint += ":8080";
+            if (!endpoint.contains(":" + TARGET_PORT)) endpoint += ":" + TARGET_PORT;
 
             String fullUrl = endpoint + "/?command=" + cmd;
             Request req = new Request.Builder().url(fullUrl).build();
