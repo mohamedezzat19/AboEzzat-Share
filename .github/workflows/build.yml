@@ -1,4 +1,5 @@
 name: Build AboEzzat Cast APK
+# Rebuild after signing alias secret was corrected.
 
 on:
   workflow_dispatch:
