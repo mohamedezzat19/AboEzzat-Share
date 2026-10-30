@@ -44,34 +44,37 @@ jobs:
       - name: Detect signing configuration
         id: signing
         env:
-          KEYSTORE_BASE64: ${{ secrets.ABOEZZAT_OLD_SHARE_KEYSTORE }}
-          STORE_PASSWORD: ${{ secrets.ABOEZZAT_OLD_SHARE_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ABOEZZAT_OLD_SHARE_KEY_ALIAS_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.ABOEZZAT_SHARE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS_SECRET: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS_PASSWORD }}
         shell: bash
         run: |
-          if [[ -z "$KEYSTORE_BASE64" || -z "$STORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
+          if [[ -z "$KEYSTORE_BASE64" || -z "$STORE_PASSWORD" || -z "$KEY_ALIAS_SECRET" || -z "$KEY_PASSWORD" ]]; then
             echo "HAS_SIGNING=false" >> "$GITHUB_ENV"
-            echo "AboEzzat Cast signing secrets are not configured; debug APK only."
+            echo "::warning::One or more AboEzzat Cast signing secrets are missing. Debug APK only."
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/classic-release-keystore.jks"
-          ALIAS="$(keytool -list -keystore "$RUNNER_TEMP/classic-release-keystore.jks" -storepass "$STORE_PASSWORD" -v 2>/dev/null | sed -n 's/^Alias name: //p' | head -n 1)"
-          if [[ -z "$ALIAS" ]]; then
-            echo "HAS_SIGNING=false" >> "$GITHUB_ENV"
-            echo "::warning::Could not read signing alias; check AboEzzat Cast keystore secrets."
-            exit 0
+          KEYSTORE_PATH="$RUNNER_TEMP/classic-release-keystore.jks"
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"; then
+            echo "::error::ABOEZZAT_SHARE_KEYSTORE_BASE64 is not valid Base64."
+            exit 1
           fi
-          echo "KEYSTORE_FILE=$RUNNER_TEMP/classic-release-keystore.jks" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=$ALIAS" >> "$GITHUB_ENV"
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS_SECRET" >/dev/null 2>&1; then
+            echo "::error::Keystore, store password, or key alias is invalid. Check the four AboEzzat Share signing secret names and values."
+            exit 1
+          fi
+          echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=$KEY_ALIAS_SECRET" >> "$GITHUB_ENV"
           echo "HAS_SIGNING=true" >> "$GITHUB_ENV"
 
       - name: Build Signed Release APK
         if: ${{ env.HAS_SIGNING == 'true' }}
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/classic-release-keystore.jks
-          KEYSTORE_PASSWORD: ${{ secrets.ABOEZZAT_OLD_SHARE_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ env.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ABOEZZAT_OLD_SHARE_KEY_ALIAS_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS_PASSWORD }}
         run: gradle assembleRelease --no-daemon
 
       - name: Verify signed Classic APK
