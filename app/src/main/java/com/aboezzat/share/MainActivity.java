@@ -87,6 +87,9 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         startLocalServer();
 
+        // Silently check the Classic app's own release channel on launch.
+        new AppUpdater(this).checkForUpdate(false);
+
         if (handleIncomingShareIntent(getIntent())) {
             return;
         }
