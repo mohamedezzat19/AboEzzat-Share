@@ -83,16 +83,18 @@ jobs:
             exit 1
           fi
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=$KEY_ALIAS_CLEAN" >> "$GITHUB_ENV"
+          echo "STORE_PASSWORD_CLEAN=$STORE_PASSWORD_CLEAN" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS_CLEAN=$KEY_ALIAS_CLEAN" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD_CLEAN=$KEY_PASSWORD_CLEAN" >> "$GITHUB_ENV"
           echo "HAS_SIGNING=true" >> "$GITHUB_ENV"
 
       - name: Build Signed Release APK
         if: ${{ env.HAS_SIGNING == 'true' }}
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/classic-release-keystore.jks
-          KEYSTORE_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ABOEZZAT_SHARE_KEY_ALIAS_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ env.STORE_PASSWORD_CLEAN }}
+          KEY_ALIAS: ${{ env.KEY_ALIAS_CLEAN }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD_CLEAN }}
         run: gradle assembleRelease --no-daemon
 
       - name: Verify signed Classic APK
