@@ -87,6 +87,9 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("AboEzzatSharePrefs", MODE_PRIVATE);
         startLocalServer();
 
+        // Silently check the Classic app's own release channel on launch.
+        new AppUpdater(this).checkForUpdate(false);
+
         if (handleIncomingShareIntent(getIntent())) {
             return;
         }
@@ -253,10 +256,18 @@ public class MainActivity extends Activity {
         // 12. إعدادات
         findViewById(R.id.menu_settings).setOnClickListener(v -> {
             closeDrawer();
-            if (etTvIp != null) {
-                etTvIp.requestFocus();
-                Toast.makeText(this, "عدل عنوان IP الشاشة واضغط حفظ", Toast.LENGTH_SHORT).show();
-            }
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("إعدادات Abo Ezzat Share")
+                    .setItems(new String[]{"التحقق من التحديثات", "إعداد عنوان IP الشاشة"}, (dialog, which) -> {
+                        if (which == 0) {
+                            new AppUpdater(MainActivity.this).checkForUpdate(true);
+                        } else if (etTvIp != null) {
+                            etTvIp.requestFocus();
+                            Toast.makeText(this, "عدل عنوان IP الشاشة واضغط حفظ", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("إغلاق", null)
+                    .show();
         });
 
         // 13. خروج
