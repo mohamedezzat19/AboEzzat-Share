@@ -56,12 +56,18 @@ jobs:
             exit 0
           fi
           KEYSTORE_PATH="$RUNNER_TEMP/classic-release-keystore.jks"
-          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"; then
-            echo "::error::ABOEZZAT_SHARE_KEYSTORE_BASE64 is not valid Base64."
+          # GitHub secret may contain copied spaces/newlines; remove whitespace from Base64 only.
+          KEYSTORE_BASE64_CLEAN="$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')"
+          if [[ -z "$KEYSTORE_BASE64_CLEAN" ]] || ! printf '%s' "$KEYSTORE_BASE64_CLEAN" | base64 --decode > "$KEYSTORE_PATH"; then
+            echo "::error::The keystore Base64 secret could not be decoded. Re-copy the original keystore as Base64 without extra text."
             exit 1
           fi
           if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS_SECRET" >/dev/null 2>&1; then
-            echo "::error::Keystore, store password, or key alias is invalid. Check the four AboEzzat Share signing secret names and values."
+            echo "::error::Keystore validation failed: check the keystore file, store password, and exact key alias."
+            exit 1
+          fi
+          if ! keytool -exportcert -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS_SECRET" -keypass "$KEY_PASSWORD" -file "$RUNNER_TEMP/signing-check.cer" >/dev/null 2>&1; then
+            echo "::error::Key validation failed: check the key password for the selected alias."
             exit 1
           fi
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
