@@ -1,4 +1,4 @@
-name: Build Abo Ezzat Share Classic APK
+name: Build AboEzzat Cast APK
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: AboEzzat-Share-Classic-debug-${{ github.run_number }}
+          name: AboEzzat-Cast-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -51,14 +51,14 @@ jobs:
         run: |
           if [[ -z "$KEYSTORE_BASE64" || -z "$STORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
             echo "HAS_SIGNING=false" >> "$GITHUB_ENV"
-            echo "Classic signing secrets are not configured; debug APK only."
+            echo "AboEzzat Cast signing secrets are not configured; debug APK only."
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/classic-release-keystore.jks"
           ALIAS="$(keytool -list -keystore "$RUNNER_TEMP/classic-release-keystore.jks" -storepass "$STORE_PASSWORD" -v 2>/dev/null | sed -n 's/^Alias name: //p' | head -n 1)"
           if [[ -z "$ALIAS" ]]; then
             echo "HAS_SIGNING=false" >> "$GITHUB_ENV"
-            echo "::warning::Could not read signing alias; check Classic keystore secrets."
+            echo "::warning::Could not read signing alias; check AboEzzat Cast keystore secrets."
             exit 0
           fi
           echo "KEYSTORE_FILE=$RUNNER_TEMP/classic-release-keystore.jks" >> "$GITHUB_ENV"
@@ -89,7 +89,7 @@ jobs:
         if: ${{ env.HAS_SIGNING == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: AboEzzat-Share-Classic-release-${{ github.run_number }}
+          name: AboEzzat-Cast-release-${{ github.run_number }}
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
@@ -99,7 +99,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: classic-build-${{ github.run_number }}
-          name: AboEzzat Share Classic build ${{ github.run_number }}
-          body: "versionCode: ${{ github.run_number }}\nSigned Classic APK for in-app updates."
+          name: AboEzzat Cast build ${{ github.run_number }}
+          body: "versionCode: ${{ github.run_number }}\nSigned AboEzzat Cast APK for in-app updates."
           files: app/build/outputs/apk/release/app-release.apk
           generate_release_notes: true
