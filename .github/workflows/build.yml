@@ -56,22 +56,34 @@ jobs:
             exit 0
           fi
           KEYSTORE_PATH="$RUNNER_TEMP/classic-release-keystore.jks"
-          # GitHub secret may contain copied spaces/newlines; remove whitespace from Base64 only.
+          # Remove accidental surrounding whitespace from copied secrets.
           KEYSTORE_BASE64_CLEAN="$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]')"
+          STORE_PASSWORD_CLEAN="$(printf '%s' "$STORE_PASSWORD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          KEY_ALIAS_CLEAN="$(printf '%s' "$KEY_ALIAS_SECRET" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          KEY_PASSWORD_CLEAN="$(printf '%s' "$KEY_PASSWORD" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           if [[ -z "$KEYSTORE_BASE64_CLEAN" ]] || ! printf '%s' "$KEYSTORE_BASE64_CLEAN" | base64 --decode > "$KEYSTORE_PATH"; then
-            echo "::error::The keystore Base64 secret could not be decoded. Re-copy the original keystore as Base64 without extra text."
+            echo "::error::The keystore Base64 secret could not be decoded."
             exit 1
           fi
-          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS_SECRET" >/dev/null 2>&1; then
-            echo "::error::Keystore validation failed: check the keystore file, store password, and exact key alias."
+          # First test the keystore and store password without assuming an alias.
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD_CLEAN" > "$RUNNER_TEMP/keystore-list.txt" 2> "$RUNNER_TEMP/keystore-error.txt"; then
+            echo "::error::STORE_PASSWORD_OR_KEYSTORE_FILE: keytool could not open the keystore with the supplied store password. Check the original file and store password."
+            sed -n '1,3p' "$RUNNER_TEMP/keystore-error.txt"
             exit 1
           fi
-          if ! keytool -exportcert -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS_SECRET" -keypass "$KEY_PASSWORD" -file "$RUNNER_TEMP/signing-check.cer" >/dev/null 2>&1; then
-            echo "::error::Key validation failed: check the key password for the selected alias."
+          # Then verify the exact alias independently.
+          if ! keytool -list -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD_CLEAN" -alias "$KEY_ALIAS_CLEAN" >/dev/null 2> "$RUNNER_TEMP/alias-error.txt"; then
+            echo "::error::KEY_ALIAS_MISMATCH: the keystore opened, but the supplied alias was not found. Available aliases are listed below:"
+            grep -E '^[[:space:]]*[A-Za-z0-9_.-]+[[:space:]]*,' "$RUNNER_TEMP/keystore-list.txt" || true
+            exit 1
+          fi
+          if ! keytool -exportcert -keystore "$KEYSTORE_PATH" -storepass "$STORE_PASSWORD_CLEAN" -alias "$KEY_ALIAS_CLEAN" -keypass "$KEY_PASSWORD_CLEAN" -file "$RUNNER_TEMP/signing-check.cer" >/dev/null 2> "$RUNNER_TEMP/key-error.txt"; then
+            echo "::error::KEY_PASSWORD_MISMATCH: the keystore and alias are valid, but the supplied key password was rejected."
+            sed -n '1,3p' "$RUNNER_TEMP/key-error.txt"
             exit 1
           fi
           echo "KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=$KEY_ALIAS_SECRET" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=$KEY_ALIAS_CLEAN" >> "$GITHUB_ENV"
           echo "HAS_SIGNING=true" >> "$GITHUB_ENV"
 
       - name: Build Signed Release APK
